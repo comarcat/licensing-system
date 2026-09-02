@@ -1,0 +1,125 @@
+@page "/"
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<AppDbContext> DbFactory
+
+<MudText Typo="Typo.h4" Class="mb-4">Dashboard</MudText>
+
+@if (_loading)
+{
+    <MudProgressCircular Indeterminate="true" />
+}
+else
+{
+    <MudGrid Class="mb-4">
+        <MudItem xs="12" sm="6" md="3">
+            <MudPaper Class="pa-4" Elevation="1">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Total Activations</MudText>
+                <MudText Typo="Typo.h5">@_totalActivations</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" sm="6" md="3">
+            <MudPaper Class="pa-4" Elevation="1">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Active Licenses</MudText>
+                <MudText Typo="Typo.h5">@_activeLicenses</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" sm="6" md="3">
+            <MudPaper Class="pa-4" Elevation="1">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Pending Review</MudText>
+                <MudText Typo="Typo.h5" Color="Color.Warning">@_pendingReview</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" sm="6" md="3">
+            <MudPaper Class="pa-4" Elevation="1">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Most-Used Software</MudText>
+                <MudText Typo="Typo.h5">@(_topProduct ?? "—")</MudText>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+
+    <MudGrid>
+        <MudItem xs="12" md="6">
+            <MudPaper Class="pa-4" Elevation="1">
+                <MudText Typo="Typo.h6" Class="mb-2">Top Software by Activations</MudText>
+                @foreach (var row in _topProducts)
+                {
+                    <MudText Typo="Typo.body2">@row.Name (@row.Count)</MudText>
+                    <MudProgressLinear Color="Color.Primary" Value="@row.Percent" Class="mb-3" />
+                }
+                @if (_topProducts.Count == 0)
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">No activations yet.</MudText>
+                }
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" md="6">
+            <MudPaper Class="pa-4" Elevation="1">
+                <MudText Typo="Typo.h6" Class="mb-2">Environment Breakdown (OS Type)</MudText>
+                <MudTable Items="@_osBreakdown" Dense="true" Hover="true">
+                    <HeaderContent>
+                        <MudTh>OS Type</MudTh>
+                        <MudTh>Activations</MudTh>
+                        <MudTh>% of Total</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd>@context.OsType</MudTd>
+                        <MudTd>@context.Count</MudTd>
+                        <MudTd>@context.Percent.ToString("0.0")%</MudTd>
+                    </RowTemplate>
+                </MudTable>
+                @if (_osBreakdown.Count == 0)
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mt-2">No data yet.</MudText>
+                }
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    private bool _loading = true;
+    private int _totalActivations;
+    private int _activeLicenses;
+    private int _pendingReview;
+    private string? _topProduct;
+    private List<(string Name, int Count, double Percent)> _topProducts = new();
+    private List<(string OsType, int Count, double Percent)> _osBreakdown = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        _totalActivations = await db.Activations.CountAsync();
+        _activeLicenses = await db.Licenses.CountAsync(l => l.Status == LicenseStatus.Active);
+        _pendingReview = await db.Activations.CountAsync(a => a.Status == ActivationStatus.PendingReview);
+
+        var byProduct = await db.Activations
+            .Include(a => a.License)
+            .ThenInclude(l => l.Product)
+            .GroupBy(a => a.License.Product.Name)
+            .Select(g => new { Name = g.Key, Count = g.Count() })
+            .OrderByDescending(g => g.Count)
+            .Take(5)
+            .ToListAsync();
+
+        var maxCount = byProduct.Count > 0 ? byProduct.Max(g => g.Count) : 0;
+        _topProducts = byProduct
+            .Select(g => (g.Name, g.Count, maxCount == 0 ? 0 : g.Count * 100.0 / maxCount))
+            .ToList();
+        _topProduct = byProduct.FirstOrDefault()?.Name;
+
+        var byOs = await db.Activations
+            .Where(a => a.OsType != null)
+            .GroupBy(a => a.OsType!)
+            .Select(g => new { OsType = g.Key, Count = g.Count() })
+            .OrderByDescending(g => g.Count)
+            .ToListAsync();
+
+        var totalOs = byOs.Sum(g => g.Count);
+        _osBreakdown = byOs
+            .Select(g => (g.OsType, g.Count, totalOs == 0 ? 0 : g.Count * 100.0 / totalOs))
+            .ToList();
+
+        _loading = false;
+    }
+}

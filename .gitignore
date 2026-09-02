@@ -1,0 +1,41 @@
+# .NET build output
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Ww][Ii][Nn]32/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+*.user
+*.suo
+*.userprefs
+
+# Visual Studio
+.vs/
+*.vsp
+*.vspx
+_ReSharper*/
+*.DotSettings.user
+
+# Rider
+.idea/
+
+# EF Core / tooling
+*.dbmdl
+
+# Secrets — NEVER commit real credentials or keys
+secrets.json
+appsettings.*.Local.json
+*.pfx
+*.pem
+dev-private.pem
+dev-public.pem
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Team artefacts local
+/status.local.md

@@ -1,0 +1,65 @@
+@page "/licenses"
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<AppDbContext> DbFactory
+
+<MudText Typo="Typo.h4" Class="mb-4">Licenses</MudText>
+
+@if (_loading)
+{
+    <MudProgressCircular Indeterminate="true" />
+}
+else
+{
+    <MudTable Items="@_licenses" Hover="true" Dense="true">
+        <HeaderContent>
+            <MudTh>License Key</MudTh>
+            <MudTh>Product</MudTh>
+            <MudTh>Model</MudTh>
+            <MudTh>Max Act.</MudTh>
+            <MudTh>Used</MudTh>
+            <MudTh>Expiry</MudTh>
+            <MudTh>Status</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="Key"><MudText Typo="Typo.body2" Style="font-family:monospace">@context.LicenseKey</MudText></MudTd>
+            <MudTd DataLabel="Product">@context.Product.Name</MudTd>
+            <MudTd DataLabel="Model">@context.ModelSnapshot</MudTd>
+            <MudTd DataLabel="Max">@context.MaxActivations</MudTd>
+            <MudTd DataLabel="Used">@context.Activations.Count(a => a.Status == ActivationStatus.Approved)</MudTd>
+            <MudTd DataLabel="Expiry">@(context.SubscriptionExpiryUtc?.ToString("yyyy-MM-dd") ?? "—")</MudTd>
+            <MudTd DataLabel="Status">
+                <MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Status)">@context.Status</MudChip>
+            </MudTd>
+        </RowTemplate>
+    </MudTable>
+    @if (_licenses.Count == 0)
+    {
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mt-4">
+            No licenses yet — license generation from the admin UI is planned next; for now, seed one via the API or directly in the database to test this list.
+        </MudText>
+    }
+}
+
+@code {
+    private bool _loading = true;
+    private List<License> _licenses = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _licenses = await db.Licenses
+            .Include(l => l.Product)
+            .Include(l => l.Activations)
+            .OrderByDescending(l => l.CreatedAtUtc)
+            .ToListAsync();
+        _loading = false;
+    }
+
+    private static Color StatusColor(LicenseStatus status) => status switch
+    {
+        LicenseStatus.Active => Color.Success,
+        LicenseStatus.Revoked => Color.Error,
+        LicenseStatus.Expired => Color.Warning,
+        _ => Color.Default,
+    };
+}

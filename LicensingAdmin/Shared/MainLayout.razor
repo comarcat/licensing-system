@@ -1,0 +1,25 @@
+@inherits LayoutComponentBase
+
+<MudThemeProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<MudLayout>
+    <MudAppBar Elevation="1">
+        <MudText Typo="Typo.h6">⚙ License Admin</MudText>
+        <MudSpacer />
+        <MudText Typo="Typo.body2">Support Staff</MudText>
+    </MudAppBar>
+    <MudDrawer Open="true" Elevation="0" Variant="DrawerVariant.Persistent">
+        <MudNavMenu>
+            <MudNavLink Href="" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dashboard">Dashboard</MudNavLink>
+            <MudNavLink Href="licenses" Icon="@Icons.Material.Filled.VpnKey">Licenses</MudNavLink>
+            <MudNavLink Href="pending-review" Icon="@Icons.Material.Filled.PendingActions">Pending Review</MudNavLink>
+        </MudNavMenu>
+    </MudDrawer>
+    <MudMainContent>
+        <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="my-4 pt-4">
+            @Body
+        </MudContainer>
+    </MudMainContent>
+</MudLayout>

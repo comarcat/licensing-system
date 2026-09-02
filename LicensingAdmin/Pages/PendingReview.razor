@@ -1,0 +1,100 @@
+@page "/pending-review"
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject ISnackbar Snackbar
+
+<MudText Typo="Typo.h4" Class="mb-1">Pending Review</MudText>
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+    Activations awaiting approval — auto-locks if unresolved after the 15-day grace window.
+</MudText>
+
+@if (_loading)
+{
+    <MudProgressCircular Indeterminate="true" />
+}
+else if (_items.Count == 0)
+{
+    <MudText Typo="Typo.body2" Color="Color.Secondary">Nothing waiting on review right now.</MudText>
+}
+else
+{
+    @foreach (var a in _items)
+    {
+        <MudPaper Class="pa-4 mb-3" Elevation="1">
+            <MudGrid AlignItems="Center.Center">
+                <MudItem xs="12" md="4">
+                    <MudText Typo="Typo.subtitle1">@a.License.Product.Name</MudText>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary" Style="font-family:monospace">
+                        Key ...@Last(a.License.LicenseKey, 4)
+                    </MudText>
+                </MudItem>
+                <MudItem xs="12" md="3">
+                    <MudText Typo="Typo.body2">Install: @a.InstallGuid</MudText>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">Detected: @a.FirstActivatedAtUtc.ToString("yyyy-MM-dd")</MudText>
+                </MudItem>
+                <MudItem xs="12" md="3">
+                    <MudText Typo="Typo.body2" Color="Color.Warning">
+                        Grace ends: @(a.ReviewDeadlineUtc?.ToString("yyyy-MM-dd") ?? "—")
+                    </MudText>
+                    @if (!string.IsNullOrEmpty(a.ReviewNotes))
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Error">@a.ReviewNotes</MudText>
+                    }
+                </MudItem>
+                <MudItem xs="12" md="2" Class="d-flex ga-2 justify-end">
+                    <MudButton Variant="Variant.Outlined" Color="Color.Success" Size="Size.Small"
+                               OnClick="@(() => Resolve(a, approve: true))">Approve</MudButton>
+                    <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small"
+                               OnClick="@(() => Resolve(a, approve: false))">Reject</MudButton>
+                </MudItem>
+            </MudGrid>
+        </MudPaper>
+    }
+}
+
+@code {
+    private bool _loading = true;
+    private List<Activation> _items = new();
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _items = await db.Activations
+            .Include(a => a.License)
+            .ThenInclude(l => l.Product)
+            .Where(a => a.Status == ActivationStatus.PendingReview)
+            .OrderBy(a => a.ReviewDeadlineUtc)
+            .ToListAsync();
+        _loading = false;
+    }
+
+    private async Task Resolve(Activation activation, bool approve)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.Activations.FirstOrDefaultAsync(a => a.Id == activation.Id);
+        if (entity is null) return;
+
+        entity.Status = approve ? ActivationStatus.Approved : ActivationStatus.Rejected;
+        entity.ReviewDeadlineUtc = null;
+        if (approve) entity.ApprovedAtUtc = DateTime.UtcNow; else entity.RejectedAtUtc = DateTime.UtcNow;
+        entity.ReviewedBy = "support-staff@vendor.com"; // TODO: pull from authenticated admin user once auth is added
+
+        db.AuditLogEntries.Add(new AuditLogEntry
+        {
+            Id = Guid.NewGuid(),
+            Actor = entity.ReviewedBy,
+            EntityType = "Activation",
+            EntityId = entity.Id.ToString(),
+            Action = approve ? "Approved" : "Rejected",
+        });
+
+        await db.SaveChangesAsync();
+        Snackbar.Add(approve ? "Activation approved." : "Activation rejected.", approve ? Severity.Success : Severity.Warning);
+        await LoadAsync();
+    }
+
+    private static string Last(string s, int n) => s.Length <= n ? s : s[^n..];
+}
