@@ -20,24 +20,23 @@ Three projects, tied together by `LicensingSystem.sln`:
 ## Database
 
 Both `LicensingApi/appsettings.json` and `LicensingAdmin/appsettings.json`
-are already pointed at:
+ship with an empty `ConnectionStrings:LicensingDb`. The expected connection
+string has the shape:
 
 ```
-Host=172.16.101.12;Port=5432;Database=licensing_app;Username=licensing;Password=***REDACTED***
+Host=<host>;Port=5432;Database=licensing_app;Username=<user>;Password=<password>
 ```
 
-**This is a plaintext credential in a checked-in file — fine for pointing at
-a local/test database while you're getting this running, but before this
-goes anywhere shared (a repo, another machine), move it to
-`dotnet user-secrets` or an environment variable instead.** From each of the
-`LicensingApi` and `LicensingAdmin` folders:
+**Never put a real connection string (with a password) in `appsettings.json`.**
+The credential always goes in `dotnet user-secrets` or in the
+`ConnectionStrings__LicensingDb` environment variable; `appsettings.json`
+stays with the empty placeholder. From each of the `LicensingApi` and
+`LicensingAdmin` folders:
 
 ```
 dotnet user-secrets init
-dotnet user-secrets set "ConnectionStrings:LicensingDb" "Host=172.16.101.12;Port=5432;Database=licensing_app;Username=licensing;Password=***REDACTED***"
+dotnet user-secrets set "ConnectionStrings:LicensingDb" "Host=<host>;Port=5432;Database=licensing_app;Username=<user>;Password=<password>"
 ```
-
-then blank out the placeholder in `appsettings.json`.
 
 ## First run
 
