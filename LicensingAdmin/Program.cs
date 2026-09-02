@@ -1,3 +1,4 @@
+using LicensingCore.Configuration;
 using LicensingCore.Data;
 using Microsoft.EntityFrameworkCore;
 using MudBlazor.Services;
@@ -13,8 +14,11 @@ builder.Services.AddMudServices();
 // the "shared data layer" link in the architecture diagram. If you'd rather have
 // it call the API's admin endpoints instead, swap AppDbContext usage in the Pages
 // for a typed HttpClient — nothing else in this project depends on that choice.
+// Fail loudly at startup (in Main, before the host is built) if the connection
+// string is missing — not lazily on the first request that resolves the factory.
+var licensingDb = ConnectionStringGuard.Require(builder.Configuration.GetConnectionString("LicensingDb"));
 builder.Services.AddDbContextFactory<AppDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("LicensingDb")));
+    options.UseNpgsql(licensingDb));
 
 var app = builder.Build();
 
