@@ -1,0 +1,423 @@
+[
+  {
+    "id": "E1-T1",
+    "title": "Scaffold LicensingSystem.Tests y wiring en la solucion",
+    "epic": "01-fundamentos",
+    "dependencies": [],
+    "priority": "p0",
+    "acceptance": [
+      "WHEN `dotnet build LicensingSystem.sln` runs THE SYSTEM SHALL exit 0 with `LicensingSystem.Tests` present as a fourth project in the solution.",
+      "WHEN `dotnet test` runs from the repo root THE SYSTEM SHALL report 1 passed, 0 failed, 0 skipped.",
+      "WHEN `LicensingApi.csproj` and `LicensingAdmin.csproj` are inspected THE SYSTEM SHALL each contain a non-empty `<UserSecretsId>` element.",
+      "WHEN `LicensingSystem.Tests.csproj` is inspected THE SYSTEM SHALL set `<IsPackable>false</IsPackable>` and reference exactly the five pinned test packages (Microsoft.NET.Test.Sdk, xunit.v3, xunit.runner.visualstudio, coverlet.collector, Microsoft.AspNetCore.Mvc.Testing) plus project references to `LicensingCore` and `LicensingAdmin`."
+    ],
+    "verify": [
+      "dotnet build LicensingSystem.sln",
+      "dotnet test"
+    ],
+    "checkpoint": "step-01-tests-scaffold",
+    "files": [
+      "LicensingSystem.Tests/LicensingSystem.Tests.csproj",
+      "LicensingSystem.Tests/SmokeTests.cs",
+      "LicensingSystem.sln",
+      "LicensingApi/LicensingApi.csproj",
+      "LicensingAdmin/LicensingAdmin.csproj"
+    ],
+    "status": "pending"
+  },
+  {
+    "id": "E1-T2",
+    "title": "T0a: guardian de cadena de conexion",
+    "epic": "01-fundamentos",
+    "dependencies": ["E1-T1"],
+    "priority": "p0",
+    "acceptance": [
+      "WHEN `ConnectionStringGuard.Require(null)`, `Require(\"\")`, or `Require(\"   \")` is called THE SYSTEM SHALL throw `InvalidOperationException` whose message names both `dotnet user-secrets` and the `ConnectionStrings__LicensingDb` environment variable.",
+      "WHEN `ConnectionStringGuard.Require(\"Host=db;Database=x\")` is called with a non-blank value THE SYSTEM SHALL return that exact string unchanged.",
+      "WHEN `dotnet test --filter ConnectionStringGuard` runs THE SYSTEM SHALL report all `ConnectionStringGuard` tests passed, 0 failed.",
+      "WHEN either `LicensingApi/Program.cs` or `LicensingAdmin/Program.cs` reads the `LicensingDb` connection string THE SYSTEM SHALL pass it through `ConnectionStringGuard.Require(...)` before constructing the `DbContext` options.",
+      "WHEN `dotnet build LicensingSystem.sln` runs THE SYSTEM SHALL exit 0."
+    ],
+    "verify": [
+      "dotnet build LicensingSystem.sln",
+      "dotnet test --filter ConnectionStringGuard"
+    ],
+    "checkpoint": "step-02-conn-guard",
+    "files": [
+      "LicensingCore/Configuration/ConnectionStringGuard.cs",
+      "LicensingSystem.Tests/ConnectionStringGuardTests.cs",
+      "LicensingApi/Program.cs",
+      "LicensingAdmin/Program.cs"
+    ],
+    "status": "pending"
+  },
+  {
+    "id": "E1-T3",
+    "title": "T0b: sacar la credencial en texto plano del repo",
+    "epic": "01-fundamentos",
+    "dependencies": ["E1-T2"],
+    "priority": "p0",
+    "acceptance": [
+      "WHEN `LicensingApi/appsettings.json` and `LicensingAdmin/appsettings.json` are inspected THE SYSTEM SHALL each set `ConnectionStrings:LicensingDb` to the empty string.",
+      "WHEN `grep -RIl \"Password=\" LicensingApi/appsettings.json LicensingAdmin/appsettings.json` runs THE SYSTEM SHALL find no match and exit 1.",
+      "WHEN `git grep -n \"Password=***REDACTED***\" -- ':!docs/blueprint'` runs THE SYSTEM SHALL find no match and exit 1.",
+      "WHEN `LicensingSystem_README.md` and `LicensingApi/README.md` are inspected THE SYSTEM SHALL show the connection string only as a placeholder with no real password value.",
+      "WHEN `dotnet build LicensingSystem.sln` runs THE SYSTEM SHALL exit 0."
+    ],
+    "verify": [
+      "grep -RIl \"Password=\" LicensingApi/appsettings.json LicensingAdmin/appsettings.json; test $? -eq 1",
+      "git grep -n \"Password=***REDACTED***\" -- ':!docs/blueprint'; test $? -eq 1",
+      "dotnet build LicensingSystem.sln"
+    ],
+    "checkpoint": "step-03-secret-scrub",
+    "files": [
+      "LicensingApi/appsettings.json",
+      "LicensingAdmin/appsettings.json",
+      "LicensingSystem_README.md",
+      "LicensingApi/README.md"
+    ],
+    "status": "pending"
+  },
+  {
+    "id": "E1-T4",
+    "title": "Generador de clave de licencia (LicensingCore)",
+    "epic": "01-fundamentos",
+    "dependencies": ["E1-T1"],
+    "priority": "p0",
+    "acceptance": [
+      "WHEN `LicenseKeyGenerator.NewKey()` is called THE SYSTEM SHALL return a string matching `^[A-Z0-9]{4}-[A-Z0-9]{5}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{2}$`.",
+      "WHEN 10000 keys are generated in one test run THE SYSTEM SHALL produce 10000 distinct values with 0 collisions.",
+      "WHEN any generated key is inspected THE SYSTEM SHALL contain only characters from `A`-`Z` and `0`-`9` plus the segment separator `-`.",
+      "WHEN `dotnet test --filter LicenseKeyGenerator` runs THE SYSTEM SHALL report all `LicenseKeyGenerator` tests passed, 0 failed."
+    ],
+    "verify": [
+      "dotnet test --filter LicenseKeyGenerator"
+    ],
+    "checkpoint": "step-04-license-key-generator",
+    "files": [
+      "LicensingCore/Licensing/LicenseKeyGenerator.cs",
+      "LicensingSystem.Tests/LicenseKeyGeneratorTests.cs"
+    ],
+    "status": "pending"
+  },
+  {
+    "id": "E1-T5",
+    "title": "Firmador de licencia (LicensingCore)",
+    "epic": "01-fundamentos",
+    "dependencies": ["E1-T4"],
+    "priority": "p0",
+    "acceptance": [
+      "WHEN `LicenseSigner.Sign(license)` output is passed to `Verify(license, signature, publicKey)` with the matching key THE SYSTEM SHALL return true.",
+      "WHEN any one canonical field (`LicenseKey`, `ProductId`, `ModelSnapshot`, `MaxActivations`, `SubscriptionExpiryUtc`) is changed and `Verify` is re-run with the original signature THE SYSTEM SHALL return false.",
+      "WHEN `Verify` is called with a different RSA public key THE SYSTEM SHALL return false.",
+      "WHEN `LicenseSigner.CanonicalBytes(license)` is decoded as UTF-8 THE SYSTEM SHALL equal `{LicenseKey}|{ProductId:D}|{(int)ModelSnapshot}|{MaxActivations}|{SubscriptionExpiryUtc:O-or-empty-string}` (empty string when `SubscriptionExpiryUtc` is null, round-trip `O` format otherwise).",
+      "WHEN `dotnet test --filter LicenseSigner` runs THE SYSTEM SHALL report all `LicenseSigner` tests passed, 0 failed."
+    ],
+    "verify": [
+      "dotnet test --filter LicenseSigner"
+    ],
+    "checkpoint": "step-05-license-signer",
+    "files": [
+      "LicensingCore/Crypto/ILicenseSigner.cs",
+      "LicensingCore/Crypto/LicenseSigner.cs",
+      "LicensingSystem.Tests/LicenseSignerTests.cs"
+    ],
+    "status": "pending"
+  },
+  {
+    "id": "E1-T6",
+    "title": "Cablear firmador + config cripto en LicensingAdmin",
+    "epic": "01-fundamentos",
+    "dependencies": ["E1-T5"],
+    "priority": "p0",
+    "acceptance": [
+      "WHEN `AddLicenseSigner(services, config)` runs with `Crypto:RsaPrivateKeyPem` set to a valid PEM THE SYSTEM SHALL register `ILicenseSigner` such that `GetRequiredService<ILicenseSigner>()` resolves without throwing.",
+      "WHEN `AddLicenseSigner(services, config)` runs with no `Crypto:RsaPrivateKeyPem` configured THE SYSTEM SHALL still resolve `ILicenseSigner` using an in-memory RSA key and SHALL log one warning.",
+      "WHEN `dotnet build LicensingSystem.sln` runs THE SYSTEM SHALL exit 0.",
+      "WHEN `LicensingAdmin/Program.cs` is inspected THE SYSTEM SHALL call `AddLicenseSigner(...)` exactly once.",
+      "WHEN `dotnet test --filter LicenseSignerDi` runs THE SYSTEM SHALL report all `LicenseSignerDi` tests passed, 0 failed."
+    ],
+    "verify": [
+      "dotnet build LicensingSystem.sln",
+      "dotnet test --filter LicenseSignerDi"
+    ],
+    "checkpoint": "step-06-signer-di",
+    "files": [
+      "LicensingAdmin/Program.cs",
+      "LicensingAdmin/Auth/CryptoRegistration.cs",
+      "LicensingSystem.Tests/CryptoRegistrationTests.cs"
+    ],
+    "status": "pending"
+  },
+  {
+    "id": "E1-T7",
+    "title": "Servicio de hashing de contrasenas",
+    "epic": "01-fundamentos",
+    "dependencies": ["E1-T1"],
+    "priority": "p0",
+    "acceptance": [
+      "WHEN `Hash(p)` output is passed to `Verify(hash, p)` THE SYSTEM SHALL return true.",
+      "WHEN `Verify(hash, wrongPassword)` is called THE SYSTEM SHALL return false.",
+      "WHEN the same password is hashed twice THE SYSTEM SHALL produce two different hash strings.",
+      "WHEN `Verify` is called with a malformed or non-matching hash string THE SYSTEM SHALL return false and SHALL NOT throw.",
+      "WHEN `dotnet test --filter PasswordHasher` runs THE SYSTEM SHALL report all `PasswordHasher` tests passed, 0 failed."
+    ],
+    "verify": [
+      "dotnet test --filter PasswordHasher"
+    ],
+    "checkpoint": "step-07-password-hasher",
+    "files": [
+      "LicensingAdmin/Auth/PasswordHasherService.cs",
+      "LicensingSystem.Tests/PasswordHasherServiceTests.cs"
+    ],
+    "status": "pending"
+  },
+  {
+    "id": "E1-T8",
+    "title": "Cookie auth + politicas + fallback policy + shell de auth",
+    "epic": "01-fundamentos",
+    "dependencies": ["E1-T6", "E1-T7"],
+    "priority": "p0",
+    "acceptance": [
+      "WHEN `AuthPolicies` is inspected THE SYSTEM SHALL expose `ViewerAccess`, `ReviewAccess`, `IssueAccess`, `AdminUserAccess` as string constants.",
+      "WHEN a `ClaimsPrincipal` in role `ReadOnlyViewer` is checked THE SYSTEM SHALL satisfy `ViewerAccess` and fail `ReviewAccess`, `IssueAccess`, `AdminUserAccess`.",
+      "WHEN a `ClaimsPrincipal` in role `SupportStaff` is checked THE SYSTEM SHALL satisfy `ViewerAccess`, `ReviewAccess`, `IssueAccess` and fail `AdminUserAccess`.",
+      "WHEN a `ClaimsPrincipal` in role `SuperAdmin` is checked THE SYSTEM SHALL satisfy all four policies, and WHEN an unauthenticated `ClaimsPrincipal` is checked THE SYSTEM SHALL fail all four policies and the fallback policy.",
+      "WHEN `LicensingAdmin/Program.cs` is inspected THE SYSTEM SHALL place `app.UseAuthentication()` after `app.UseRouting()` and before `app.MapBlazorHub()`, and SHALL set an authorization `FallbackPolicy` that requires an authenticated user.",
+      "WHEN `dotnet build LicensingSystem.sln` runs THE SYSTEM SHALL exit 0 and `dotnet test --filter AuthPolicies` SHALL report all tests passed, 0 failed."
+    ],
+    "verify": [
+      "dotnet build LicensingSystem.sln",
+      "dotnet test --filter AuthPolicies",
+      "awk '/app\\.UseRouting\\(\\)/{r=NR} /app\\.UseAuthentication\\(\\)/{a=NR} /app\\.MapBlazorHub\\(\\)/{h=NR} END{exit !(r>0 && a>0 && h>0 && r<a && a<h)}' LicensingAdmin/Program.cs"
+    ],
+    "checkpoint": "step-08-cookie-auth",
+    "files": [
+      "LicensingAdmin/Auth/AuthPolicies.cs",
+      "LicensingSystem.Tests/AuthPoliciesTests.cs",
+      "LicensingAdmin/Program.cs",
+      "LicensingAdmin/App.razor",
+      "LicensingAdmin/_Imports.razor"
+    ],
+    "status": "pending"
+  },
+  {
+    "id": "E2-T1",
+    "title": "Auth-state provider + servicio de credenciales",
+    "epic": "02-auth-y-licencias",
+    "dependencies": ["E1-T8"],
+    "priority": "p0",
+    "acceptance": [
+      "WHEN `AdminCredentialService.BuildPrincipal(adminUser)` runs THE SYSTEM SHALL return a `ClaimsPrincipal` carrying `ClaimTypes.Name` = the user's email and `ClaimTypes.Role` = the `AdminRole` name.",
+      "WHEN `ValidateAsync(email, password)` is given an email that matches no `admin_users` row THE SYSTEM SHALL return null.",
+      "WHEN `ValidateAsync` matches a row whose `IsActive` is false THE SYSTEM SHALL return null even if the password is correct.",
+      "WHEN `ValidateAsync` matches an active row and the password verifies THE SYSTEM SHALL return a non-null principal built by `BuildPrincipal`.",
+      "WHEN `dotnet build LicensingSystem.sln` runs THE SYSTEM SHALL exit 0.",
+      "WHEN `dotnet test --filter AdminCredential` runs THE SYSTEM SHALL report all `AdminCredential` tests passed, 0 failed."
+    ],
+    "verify": [
+      "dotnet build LicensingSystem.sln",
+      "dotnet test --filter AdminCredential"
+    ],
+    "checkpoint": "step-09-auth-state",
+    "files": [
+      "LicensingAdmin/Auth/AdminAuthStateProvider.cs",
+      "LicensingAdmin/Auth/AdminCredentialService.cs",
+      "LicensingSystem.Tests/AdminCredentialServiceTests.cs",
+      "LicensingAdmin/Program.cs"
+    ],
+    "status": "pending"
+  },
+  {
+    "id": "E2-T2",
+    "title": "Paginas Razor de login/logout + test de pipeline de autorizacion",
+    "epic": "02-auth-y-licencias",
+    "dependencies": ["E2-T1"],
+    "priority": "p0",
+    "acceptance": [
+      "WHEN `GET /Account/Login` is requested with no authentication cookie THE SYSTEM SHALL return HTTP 200.",
+      "WHEN `GET /` is requested with no authentication cookie THE SYSTEM SHALL return HTTP 302 whose `Location` header starts with `/Account/Login`.",
+      "WHEN `GET /pending-review` is requested with no authentication cookie THE SYSTEM SHALL return HTTP 302 whose `Location` header starts with `/Account/Login`.",
+      "WHEN `LicensingAdmin/Pages/Account/Login.cshtml.cs` is inspected THE SYSTEM SHALL carry `[AllowAnonymous]` and, on any null `ValidateAsync` result, re-render the page with a single generic error message that does not distinguish the failure cause.",
+      "WHEN a POST to `/Account/Login` succeeds THE SYSTEM SHALL call `HttpContext.SignInAsync`, set `AdminUser.LastLoginAtUtc`, and write an `AuditLogEntry` with `Action` = \"Login\".",
+      "WHEN `dotnet build LicensingSystem.sln` runs THE SYSTEM SHALL exit 0 and `dotnet test --filter AuthorizationPipeline` SHALL report all tests passed, 0 failed."
+    ],
+    "verify": [
+      "dotnet build LicensingSystem.sln",
+      "dotnet test --filter AuthorizationPipeline",
+      "grep -q \"\\[AllowAnonymous\\]\" LicensingAdmin/Pages/Account/Login.cshtml.cs"
+    ],
+    "checkpoint": "step-10-login-pages",
+    "files": [
+      "LicensingSystem.Tests/AuthorizationPipelineTests.cs",
+      "LicensingAdmin/Pages/Account/Login.cshtml",
+      "LicensingAdmin/Pages/Account/Login.cshtml.cs",
+      "LicensingAdmin/Pages/Account/Logout.cshtml.cs",
+      "LicensingAdmin/Program.cs"
+    ],
+    "status": "pending"
+  },
+  {
+    "id": "E2-T3",
+    "title": "Seeder del primer SuperAdmin",
+    "epic": "02-auth-y-licencias",
+    "dependencies": ["E2-T2"],
+    "priority": "p0",
+    "acceptance": [
+      "WHEN `AdminSeeder.ShouldSeed(true, \"a@b.c\", \"pw\")` runs THE SYSTEM SHALL return true, and WHEN called with `false` as the first argument THE SYSTEM SHALL return false.",
+      "WHEN `AdminSeeder.ShouldSeed(true, null, \"pw\")` or `AdminSeeder.ShouldSeed(true, \"a@b.c\", null)` runs THE SYSTEM SHALL return false.",
+      "WHEN `AdminSeeder.BuildSuperAdmin(\"a@b.c\", \"pw\", hasher)` runs THE SYSTEM SHALL return an `AdminUser` with `Role == SuperAdmin`, `IsActive == true`, and a non-empty `PasswordHash` not equal to `\"pw\"`.",
+      "WHEN `LicensingAdmin/Program.cs` is inspected THE SYSTEM SHALL register `AddHostedService<AdminSeeder>()` exactly once.",
+      "WHEN the `WebApplicationFactory<Program>` in `AuthorizationPipelineTests` starts THE SYSTEM SHALL remove the `AdminSeeder` hosted service in `ConfigureTestServices` so no database access occurs at host startup.",
+      "WHEN `dotnet test --filter AdminSeeder` and `dotnet test --filter AuthorizationPipeline` run THE SYSTEM SHALL both report all tests passed, 0 failed."
+    ],
+    "verify": [
+      "dotnet test --filter AdminSeeder",
+      "dotnet test --filter AuthorizationPipeline"
+    ],
+    "checkpoint": "step-11-admin-seeder",
+    "files": [
+      "LicensingAdmin/Startup/AdminSeeder.cs",
+      "LicensingSystem.Tests/AdminSeederTests.cs",
+      "LicensingAdmin/Program.cs",
+      "LicensingSystem.Tests/AuthorizationPipelineTests.cs"
+    ],
+    "status": "pending"
+  },
+  {
+    "id": "E2-T4",
+    "title": "Proteger pantallas existentes + revisor real",
+    "epic": "02-auth-y-licencias",
+    "dependencies": ["E1-T8", "E2-T1"],
+    "priority": "p0",
+    "acceptance": [
+      "WHEN `Dashboard.razor` and `Licenses.razor` are inspected THE SYSTEM SHALL each carry `@attribute [Authorize(Policy = AuthPolicies.ViewerAccess)]`.",
+      "WHEN `PendingReview.razor` is inspected THE SYSTEM SHALL carry `@attribute [Authorize(Policy = AuthPolicies.ReviewAccess)]`.",
+      "WHEN an activation is approved or rejected THE SYSTEM SHALL set `entity.ReviewedBy` and the new `AuditLogEntry.Actor` from `CurrentAdmin.Email(...)`, not from any hardcoded literal.",
+      "WHEN `grep -RIl \"support-staff@vendor.com\" LicensingAdmin/` runs THE SYSTEM SHALL find no match and exit 1.",
+      "WHEN `CurrentAdmin.Email(principal)` is given an authenticated principal THE SYSTEM SHALL return its `ClaimTypes.Name` value, and given an anonymous principal SHALL return `\"\"`.",
+      "WHEN `dotnet build LicensingSystem.sln` and `dotnet test --filter CurrentAdmin` run THE SYSTEM SHALL both exit 0 with all `CurrentAdmin` tests passed."
+    ],
+    "verify": [
+      "dotnet build LicensingSystem.sln",
+      "grep -RIl \"support-staff@vendor.com\" LicensingAdmin/; test $? -eq 1",
+      "test -z \"$(grep -L '@attribute \\[Authorize(Policy = AuthPolicies\\.' LicensingAdmin/Pages/Dashboard.razor LicensingAdmin/Pages/Licenses.razor LicensingAdmin/Pages/PendingReview.razor)\"",
+      "dotnet test --filter CurrentAdmin"
+    ],
+    "checkpoint": "step-12-gate-screens",
+    "files": [
+      "LicensingAdmin/Pages/Dashboard.razor",
+      "LicensingAdmin/Pages/Licenses.razor",
+      "LicensingAdmin/Pages/PendingReview.razor",
+      "LicensingAdmin/Auth/CurrentAdmin.cs",
+      "LicensingSystem.Tests/CurrentAdminTests.cs"
+    ],
+    "status": "pending"
+  },
+  {
+    "id": "E2-T5",
+    "title": "Servicio de emision de licencias",
+    "epic": "02-auth-y-licencias",
+    "dependencies": ["E1-T4", "E1-T5"],
+    "priority": "p0",
+    "acceptance": [
+      "WHEN `LicenseIssuanceService.IssueAsync(request)` runs with a valid request THE SYSTEM SHALL produce a `License` whose `LicenseKey` matches `^[A-Z0-9]{4}-[A-Z0-9]{5}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{2}$`.",
+      "WHEN the produced `License.Signature` is checked with `ILicenseSigner.Verify` and the issuing public key THE SYSTEM SHALL return true.",
+      "WHEN the fake `ILicenseStore` reports the first generated key already exists THE SYSTEM SHALL generate another key and retry until `LicenseKeyExistsAsync` returns false.",
+      "WHEN the request carries model flags and `MaxActivations` THE SYSTEM SHALL copy them into `License.ModelSnapshot` and `License.MaxActivations`.",
+      "WHEN issuance succeeds THE SYSTEM SHALL pass the store one `AuditLogEntry` with `Action == \"Created\"` and `EntityType == \"License\"`.",
+      "WHEN `dotnet test --filter LicenseIssuance` runs THE SYSTEM SHALL report all `LicenseIssuance` tests passed, 0 failed."
+    ],
+    "verify": [
+      "dotnet test --filter LicenseIssuance"
+    ],
+    "checkpoint": "step-13-license-issuance",
+    "files": [
+      "LicensingAdmin/Licensing/LicenseIssuanceService.cs",
+      "LicensingAdmin/Licensing/ILicenseStore.cs",
+      "LicensingAdmin/Licensing/EfLicenseStore.cs",
+      "LicensingAdmin/Licensing/LicenseIssuanceRequest.cs",
+      "LicensingSystem.Tests/LicenseIssuanceServiceTests.cs"
+    ],
+    "status": "pending"
+  },
+  {
+    "id": "E2-T6",
+    "title": "Pantalla Generar nueva licencia + shell de MainLayout",
+    "epic": "02-auth-y-licencias",
+    "dependencies": ["E2-T4", "E2-T5"],
+    "priority": "p1",
+    "acceptance": [
+      "WHEN `LicensingAdmin/Pages/Licenses/New.razor` is inspected THE SYSTEM SHALL carry `@attribute [Authorize(Policy = AuthPolicies.IssueAccess)]` so a `ReadOnlyViewer` or anonymous user is denied.",
+      "WHEN the form is submitted with the \"new product\" switch on THE SYSTEM SHALL create the `SoftwareProduct` and then issue the license through `LicenseIssuanceService`, and WHEN an existing product is chosen THE SYSTEM SHALL reuse it.",
+      "WHEN issuance succeeds THE SYSTEM SHALL display the generated license key in a `MudPaper` with a copy button and a link back to `/licenses`.",
+      "WHEN the `Subscription` model flag is not selected THE SYSTEM SHALL keep the subscription-expiry date picker disabled.",
+      "WHEN `MainLayout.razor` is rendered THE SYSTEM SHALL show the signed-in user's email and a logout link and SHALL wrap every nav link, including \"Generar licencia\" (`IssueAccess`) and \"Usuarios admin\" (`AdminUserAccess`), in `<AuthorizeView Policy=\"...\">`.",
+      "WHEN `dotnet build LicensingSystem.sln` and the full `dotnet test` suite run THE SYSTEM SHALL both exit 0 with 0 failed and 0 skipped."
+    ],
+    "verify": [
+      "dotnet build LicensingSystem.sln",
+      "grep -q '@attribute \\[Authorize(Policy = AuthPolicies\\.IssueAccess)\\]' LicensingAdmin/Pages/Licenses/New.razor",
+      "dotnet test",
+      "# manual: compare /licenses/new against epics/02-auth-y-licencias.md task E2-T6; run `dotnet run --project LicensingAdmin` against 172.16.101.12 with a seeded SuperAdmin, sign in, issue a license, confirm the rendered key matches the format regex"
+    ],
+    "checkpoint": "step-14-generate-license-page",
+    "files": [
+      "LicensingAdmin/Pages/Licenses/New.razor",
+      "LicensingAdmin/Shared/MainLayout.razor"
+    ],
+    "status": "pending"
+  },
+  {
+    "id": "E2-T7",
+    "title": "Pantalla de administradores",
+    "epic": "02-auth-y-licencias",
+    "dependencies": ["E1-T7", "E2-T3", "E2-T4"],
+    "priority": "p1",
+    "acceptance": [
+      "WHEN `LicensingAdmin/Pages/Admin/Users.razor` is inspected THE SYSTEM SHALL carry `@attribute [Authorize(Policy = AuthPolicies.AdminUserAccess)]`.",
+      "WHEN `AdminUserService.CreateAsync(email, role, tempPassword)` runs THE SYSTEM SHALL build an `AdminUser` whose `PasswordHash` comes from `PasswordHasherService.Hash` (never the plaintext) and whose `Role` is the requested role.",
+      "WHEN `CreateAsync` is given an email that already exists case-insensitively THE SYSTEM SHALL reject it and call no store write.",
+      "WHEN a successful create or an `IsActive` toggle occurs THE SYSTEM SHALL write an `AuditLogEntry` (`Action` \"Created\" or \"Updated\", `EntityType` \"AdminUser\").",
+      "WHEN `dotnet build LicensingSystem.sln` and `dotnet test --filter AdminUserService` run THE SYSTEM SHALL both exit 0 with all `AdminUserService` tests passed."
+    ],
+    "verify": [
+      "dotnet build LicensingSystem.sln",
+      "grep -q '@attribute \\[Authorize(Policy = AuthPolicies\\.AdminUserAccess)\\]' LicensingAdmin/Pages/Admin/Users.razor",
+      "dotnet test --filter AdminUserService"
+    ],
+    "checkpoint": "step-15-admin-users",
+    "files": [
+      "LicensingAdmin/Pages/Admin/Users.razor",
+      "LicensingAdmin/Auth/AdminUserService.cs",
+      "LicensingAdmin/Auth/IAdminUserStore.cs",
+      "LicensingSystem.Tests/AdminUserServiceTests.cs"
+    ],
+    "status": "pending"
+  },
+  {
+    "id": "E2-T8",
+    "title": "Smoke de solucion + regresion + auditoria de checkpoints",
+    "epic": "02-auth-y-licencias",
+    "dependencies": ["E2-T6", "E2-T7"],
+    "priority": "p0",
+    "acceptance": [
+      "WHEN `dotnet build LicensingSystem.sln -warnaserror` runs THE SYSTEM SHALL exit 0 with no analyzer warning escalated to an error.",
+      "WHEN `dotnet test` runs the full suite THE SYSTEM SHALL exit 0 with 0 failed and 0 skipped.",
+      "WHEN `grep -RIl \"support-staff@vendor.com\" LicensingAdmin/` runs THE SYSTEM SHALL find no match and exit 1.",
+      "WHEN `git grep -n \"Password=***REDACTED***\" -- ':!docs/blueprint'` runs THE SYSTEM SHALL find no match and exit 1.",
+      "WHEN this step's own checkpoint tag exists THE SYSTEM SHALL make `git tag -l 'step-*'` list exactly 16 tags, one per build step."
+    ],
+    "verify": [
+      "dotnet build LicensingSystem.sln -warnaserror",
+      "dotnet test",
+      "grep -RIl \"support-staff@vendor.com\" LicensingAdmin/; test $? -eq 1",
+      "git grep -n \"Password=***REDACTED***\" -- ':!docs/blueprint'; test $? -eq 1"
+    ],
+    "checkpoint": "step-16-smoke",
+    "files": [
+      "LicensingSystem.Tests/SmokeTests.cs"
+    ],
+    "status": "pending"
+  }
+]
