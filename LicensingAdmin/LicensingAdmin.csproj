@@ -5,6 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>LicensingAdmin</RootNamespace>
+    <UserSecretsId>509d1d83-45b7-4292-8ecc-050bd4f65d1c</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>
