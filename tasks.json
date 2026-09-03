@@ -178,7 +178,7 @@
       "LicensingAdmin/Auth/PasswordHasherService.cs",
       "LicensingSystem.Tests/PasswordHasherServiceTests.cs"
     ],
-    "status": "in_progress"
+    "status": "done"
   },
   {
     "id": "E1-T8",
