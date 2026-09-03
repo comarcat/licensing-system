@@ -1,3 +1,4 @@
+using LicensingCore.Configuration;
 using LicensingCore.Data;
 using LicensingApi.Services;
 using Microsoft.EntityFrameworkCore;
@@ -5,8 +6,11 @@ using System.Security.Cryptography;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Fail loudly at startup (in Main, before the host is built) if the connection
+// string is missing — not lazily on the first request that touches the DbContext.
+var licensingDb = ConnectionStringGuard.Require(builder.Configuration.GetConnectionString("LicensingDb"));
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("LicensingDb")));
+    options.UseNpgsql(licensingDb));
 
 builder.Services.AddControllers();
 
