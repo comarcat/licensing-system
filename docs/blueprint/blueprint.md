@@ -1969,6 +1969,9 @@ Más estas puertas manuales, cada una comprobada una vez antes de publicar:
 | 12 | `AddLicenseSigner` (paso 6) **fail-closea** fuera de Development: sin `Crypto:RsaPrivateKeyPem` lanza; PEM malformado/solo-público/<2048 lanza en el registro | Replicar el fallback laxo "solo warning" de `LicensingApi/Program.cs` (lo que decía el blueprint original) | Un admin que emite licencias firmadas con una clave efímera que muere en cada reinicio es un problema de integridad, no una comodidad de dev; el auditor lo escalaría a ALTA si se aceptara. Consistente con `ConnectionStringGuard` | El equipo estandarice un mecanismo de arranque distinto para el material de clave (Key Vault, PFX en el host) que ya garantice presencia |
 | 13 | `AccessDeniedPath = "/Account/AccessDenied"` (página propia, HTTP 200 "sin permiso"); `<NotAuthorized>` muestra mensaje si el usuario está autenticado, redirige solo si es anónimo | Ambos paths a `/Account/Login` (lo que decía el blueprint original) | Un `ReadOnlyViewer` autenticado que abre `/pending-review` (con `[Authorize(Policy=ReviewAccess)]` desde E2-T4) entraría en bucle login↔returnUrl | Nunca — es el patrón correcto de ASP.NET Core; el original era un error |
 | 14 | Cookie: `SecurePolicy = IsDevelopment() ? SameAsRequest : Always`, `SameSite = Lax` explícito, `UseHttpsRedirection` en prod, `ExpireTimeSpan = 8h`, `OnValidatePrincipal` que revalida `AdminUser` (existe+activo+rol) | `SameAsRequest` fijo + solo `SlidingExpiration` (lo que decía el blueprint original) | `UseHsts()` ya asume HTTPS en prod; `Always` no cuesta nada tras TLS y evita fuga de cookie por http; sin `ExpireTimeSpan` + sliding, un admin desactivado conserva sesión hasta 14 días | La prod del host IIS resulta ser **HTTP puro** (entonces `UseHsts()` también estaría mal y hay que revisar ambos), o aparece un requisito de sesiones más largas |
+| 15 | `AdminUser.Email` se **normaliza en la escritura** (minúsculas + `Trim()`) — el seeder (paso 11) lo hace en `BuildSuperAdmin` y en la ruta de seed; `AdminUserService` (paso 15) hará lo mismo. `EfAdminUserLookup` sigue comparando `u.Email.ToLower() == normalized` en este slice | Índice funcional `lower("Email")` vía migración, o dejar el desajuste de mayúsculas | El índice único de `admin_users.Email` es case-sensitive; normalizar en la escritura da unicidad efectiva case-insensitive sin migración (Non-Goal §1). El predicado no-sargable es un seq scan barato en un panel interno de bajo volumen | Se añade CI/carga que haga notar el seq scan por request autenticada → predicado `u.Email == normalized` + índice; o entran migraciones EF (§20.4) |
+| 16 | Riesgo aceptado en este slice: `AdminRole.SuperAdmin = 0` (== `default(AdminRole)`) y `AdminUser.Role` se materializa sin `Enum.IsDefined` | Reordenar `Enums.cs` a `ReadOnlyViewer = 0` + `Enum.IsDefined` al leer la fila | La columna usa `HasConversion<string>()` (no guarda el ordinal) y toda ruta de creación fija `Role` explícitamente (seeder → `SuperAdmin` a propósito; `AdminUserService` lo pedirá); el hueco `(AdminRole)99` sólo da un principal con `FallbackPolicy`. Endurecerlo toca `LicensingCore/Entities/Enums.cs`, fuera de los `files` de E2-T1/E2-T3 | Slice de hardening (§20.4 #9); o una inserción de `AdminUser` sin fijar `Role` entra en el código |
+| 17 | `LicenseIssuanceRequest` reusa `int MaxActivations` para `SoftwareProduct.DefaultMaxActivations` del producto nuevo | Un campo separado `int? NewProductDefaultMaxActivations` (como listaba el paso 13) | El default del producto = el tope de la primera licencia emitida es un valor de partida razonable y ahorra un campo del formulario de E2-T6; siempre editable luego en el producto | Se necesite emitir la primera licencia de un producto con un tope distinto del default del producto |
 
 ### 20.4 What to build next
 
@@ -1990,6 +1993,31 @@ Del §1 Non-Goals y de los hallazgos diferidos del build, en orden:
    por email.
 7. **Desacoplar `LicensingAdmin` → llamadas a endpoints admin de `LicensingApi`** — disparador:
    admin y API se separan en hosts distintos (ver §20.3 #2).
+8. **Predicado de email sargable + DRY de `EfAdminUserLookup`** — cuando el seed normalizado (§20.3
+   #15) esté en `main`: cambiar `EfAdminUserLookup.FindByEmailAsync` a `u.Email == normalized`
+   (usa el índice único), y hacer que `Login.cshtml.cs::RecordLoginAsync` llame a
+   `IAdminUserLookup.FindByEmailAsync` en vez de reimplementar la consulta (3er call site del
+   patrón interino) y fije `Id = Guid.NewGuid()` en su `AuditLogEntry` como el resto del repo —
+   disparador: se añade CI/carga, o el siguiente slice que toque auth.
+9. **`AdminRole` reordenado (`ReadOnlyViewer = 0`) + `Enum.IsDefined` al materializar la fila**
+   (`LicensingCore/Entities/Enums.cs`) — cierra §20.3 #16 — disparador: slice de hardening, o
+   antes de exponer la creación de admins a más de una persona de confianza.
+10. **Lockout de login en memoria + fila de auditoría `LoginFailed`** — `IMemoryCache` por email
+    (p. ej. 5 fallos / 15 min) en el POST de `/Account/Login` + `AuditLogEntry`
+    `Action="LoginFailed"` con `Actor` = email normalizado (sin cambio de esquema). El
+    rate-limiting de middleware sigue Non-Goal (§1). Disparador: el panel gana exposición fuera de
+    la LAN de confianza, o auditoría/compliance pide traza de intentos fallidos.
+11. **Middleware de cabeceras de seguridad app-wide** — `X-Frame-Options: DENY` / CSP
+    `frame-ancestors 'none'`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` en
+    `LicensingAdmin/Program.cs`. La página de login es un documento `Layout = null` independiente
+    → hoy embebible en iframe (clickjacking del formulario). Disparador: slice de hardening del
+    host, o antes de exponer el panel fuera de la LAN.
+12. **Endurecer `EfLicenseStore.AddAsync` y la validación del formulario de emisión** — capturar
+    `DbUpdateException` con `SqlState == "23505"` del índice `ux_licenses_license_key` → excepción
+    de dominio tipada (para reintento/error limpio en vez de que suba cruda al error boundary);
+    `Trim()` + acotar longitud de `CustomerEmail` (≤320) / `CustomerName` (≤200) antes de EF.
+    (E2-T6 ya impone el mínimo de 1 en `MaxActivations` en `New.razor`.) Disparador: la pantalla
+    de emisión entra en uso real, o el siguiente slice que toque `Licensing/`.
 
 ---
 

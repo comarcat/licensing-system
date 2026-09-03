@@ -236,11 +236,12 @@ añade `AddHostedService<AdminSeeder>()`— extiende este archivo para quitar es
 `GET /Account/Login` anónimo → 200; `GET /` y `GET /pending-review` anónimos → 302 con `Location`
 que empieza por `/Account/Login`.
 
-**Files** (6 — páginas de cuenta + wiring; el tope de 5 se exime, igual que E1-T1/E1-T8)
+**Files** (7 — páginas de cuenta + wiring; el tope de 5 se exime, igual que E1-T1/E1-T8)
 - `LicensingSystem.Tests/AuthorizationPipelineTests.cs` — nuevo: clase `AuthorizationPipelineTests`
 - `LicensingAdmin/Pages/Account/Login.cshtml` — nuevo: markup del formulario
 - `LicensingAdmin/Pages/Account/Login.cshtml.cs` — nuevo: `[AllowAnonymous]`, GET/POST, `Url.IsLocalUrl`
 - `LicensingAdmin/Pages/Account/Logout.cshtml.cs` — nuevo
+- `LicensingAdmin/Pages/Account/Logout.cshtml` — nuevo: vista mínima POST-only (botón + antiforgery); un PageModel sin su `.cshtml` no lo enruta Razor Pages
 - `LicensingAdmin/Pages/Account/AccessDenied.cshtml` — nuevo: `[AllowAnonymous]`, "sin permiso" (200)
 - `LicensingAdmin/Program.cs` — edit: `public partial class Program { }`
 
@@ -276,7 +277,10 @@ git tag step-10-login-pages
 `AdminSeeder` : `IHostedService`. `static bool ShouldSeed(bool tableEmpty, string? email, string?
 password)` = `tableEmpty && !IsNullOrWhiteSpace(email) && !IsNullOrWhiteSpace(password)`. `static
 AdminUser BuildSuperAdmin(string email, string password, PasswordHasherService hasher)` = usuario
-`SuperAdmin`, `IsActive = true`, `PasswordHash = hasher.Hash(password)`. `StartAsync`: si
+`SuperAdmin`, `IsActive = true`, `PasswordHash = hasher.Hash(password)`,
+`Email = email.Trim().ToLowerInvariant()` (el índice único de `admin_users.Email` es
+case-sensitive y `EfAdminUserLookup` ya busca en minúsculas — normalizar en la escritura del
+seeder cierra el desajuste para el admin de arranque). `StartAsync`: si
 `ShouldSeed(!await db.AdminUsers.AnyAsync(), config["Admin:BootstrapEmail"],
 config["Admin:BootstrapPassword"])`, inserta el usuario + `AuditLogEntry` (`Actor`="system",
 `Action`="Created", `EntityType`="AdminUser"). Registra `AddHostedService<AdminSeeder>()` en
@@ -298,9 +302,10 @@ posterior.
 1. **WHEN** `AdminSeeder.ShouldSeed(true, "a@b.c", "pw")` runs **THE SYSTEM SHALL** return true, and **WHEN** called with `false` as the first argument **THE SYSTEM SHALL** return false.
 2. **WHEN** `AdminSeeder.ShouldSeed(true, null, "pw")` or `AdminSeeder.ShouldSeed(true, "a@b.c", null)` runs **THE SYSTEM SHALL** return false.
 3. **WHEN** `AdminSeeder.BuildSuperAdmin("a@b.c", "pw", hasher)` runs **THE SYSTEM SHALL** return an `AdminUser` with `Role == SuperAdmin`, `IsActive == true`, and a non-empty `PasswordHash` not equal to `"pw"`.
-4. **WHEN** `LicensingAdmin/Program.cs` is inspected **THE SYSTEM SHALL** register `AddHostedService<AdminSeeder>()` exactly once.
-5. **WHEN** the `WebApplicationFactory<Program>` in `AuthorizationPipelineTests` starts **THE SYSTEM SHALL** remove the `AdminSeeder` hosted service in `ConfigureTestServices` so no database access occurs at host startup.
-6. **WHEN** `dotnet test --filter AdminSeeder` and `dotnet test --filter AuthorizationPipeline` run **THE SYSTEM SHALL** both report all tests passed, 0 failed.
+4. **WHEN** `AdminSeeder.BuildSuperAdmin("  Admin@B.C  ", "pw", hasher)` runs **THE SYSTEM SHALL** return an `AdminUser` whose `Email` is `"admin@b.c"` (trimmed and lower-cased), and the `StartAsync` seed path **SHALL** normalise `config["Admin:BootstrapEmail"]` the same way so the bootstrap admin can sign in regardless of the case configured.
+5. **WHEN** `LicensingAdmin/Program.cs` is inspected **THE SYSTEM SHALL** register `AddHostedService<AdminSeeder>()` exactly once.
+6. **WHEN** the `WebApplicationFactory<Program>` in `AuthorizationPipelineTests` starts **THE SYSTEM SHALL** remove the `AdminSeeder` hosted service in `ConfigureTestServices` so no database access occurs at host startup.
+7. **WHEN** `dotnet test --filter AdminSeeder` and `dotnet test --filter AuthorizationPipeline` run **THE SYSTEM SHALL** both report all tests passed, 0 failed.
 
 **Verify**
 
@@ -408,8 +413,10 @@ git tag step-13-license-issuance
 
 `Pages/Licenses/New.razor` (`@page "/licenses/new"`, `@attribute [Authorize(Policy =
 AuthPolicies.IssueAccess)]`): `MudForm` con `MudSelect` de productos + switch "Nuevo producto";
-checkboxes de `LicenseModel`; `MudNumericField` MaxActivations; `MudDatePicker` habilitado solo con
-el flag `Subscription`; `MudTextField` cliente. Submit → `LicenseIssuanceService.IssueAsync` con
+checkboxes de `LicenseModel`; `MudNumericField` MaxActivations (`Min="1"` — el servicio firma
+verbatim lo que reciba, así que la validación de rango vive en el formulario); `MudDatePicker`
+habilitado solo con el flag `Subscription`; `MudTextField` cliente (los campos de cliente se
+`Trim()`ean antes de enviar). Submit → `LicenseIssuanceService.IssueAsync` con
 `CurrentAdmin.Email(...)` → `MudPaper` con la clave, botón copiar, enlace "Volver a Licencias".
 Estados loading/empty/error. `MainLayout.razor`: en `MudAppBar`, `<AuthorizeView>` con
 `context.User.Identity?.Name` + enlace "Cerrar sesión" a `/Account/Logout` (reemplaza "Support

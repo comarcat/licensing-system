@@ -264,6 +264,7 @@
       "LicensingAdmin/Pages/Account/Login.cshtml",
       "LicensingAdmin/Pages/Account/Login.cshtml.cs",
       "LicensingAdmin/Pages/Account/Logout.cshtml.cs",
+      "LicensingAdmin/Pages/Account/Logout.cshtml",
       "LicensingAdmin/Pages/Account/AccessDenied.cshtml",
       "LicensingAdmin/Program.cs"
     ],
@@ -279,6 +280,7 @@
       "WHEN `AdminSeeder.ShouldSeed(true, \"a@b.c\", \"pw\")` runs THE SYSTEM SHALL return true, and WHEN called with `false` as the first argument THE SYSTEM SHALL return false.",
       "WHEN `AdminSeeder.ShouldSeed(true, null, \"pw\")` or `AdminSeeder.ShouldSeed(true, \"a@b.c\", null)` runs THE SYSTEM SHALL return false.",
       "WHEN `AdminSeeder.BuildSuperAdmin(\"a@b.c\", \"pw\", hasher)` runs THE SYSTEM SHALL return an `AdminUser` with `Role == SuperAdmin`, `IsActive == true`, and a non-empty `PasswordHash` not equal to `\"pw\"`.",
+      "WHEN `AdminSeeder.BuildSuperAdmin(\"  Admin@B.C  \", \"pw\", hasher)` runs THE SYSTEM SHALL return an `AdminUser` whose `Email` is `\"admin@b.c\"` (trimmed and lower-cased), and the `StartAsync` seed path SHALL normalise `config[\"Admin:BootstrapEmail\"]` the same way so the bootstrap admin can sign in regardless of the case configured.",
       "WHEN `LicensingAdmin/Program.cs` is inspected THE SYSTEM SHALL register `AddHostedService<AdminSeeder>()` exactly once.",
       "WHEN the `WebApplicationFactory<Program>` in `AuthorizationPipelineTests` starts THE SYSTEM SHALL remove the `AdminSeeder` hosted service in `ConfigureTestServices` so no database access occurs at host startup.",
       "WHEN `dotnet test --filter AdminSeeder` and `dotnet test --filter AuthorizationPipeline` run THE SYSTEM SHALL both report all tests passed, 0 failed."
