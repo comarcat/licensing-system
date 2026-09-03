@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
@@ -56,36 +57,106 @@ public class AuthorizationPipelineTests : IClassFixture<AuthorizationPipelineTes
         return location.IsAbsoluteUri ? location.PathAndQuery : location.OriginalString;
     }
 
+    // ---- criterion 1: AccessDenied is an anonymous, non-redirecting 200 --------
+
+    [Fact]
+    public async Task Get_access_denied_without_cookie_returns_200_with_permission_copy()
+    {
+        var response = await AnonymousClient().GetAsync("/Account/AccessDenied", TestContext.Current.CancellationToken);
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("Sin permiso", body);
+        Assert.Contains("No tienes permiso", body);
+    }
+
+    // ---- criterion "Logout": document the GET behaviour (render only; POST signs out) --
+
+    [Fact]
+    public async Task Get_logout_without_cookie_returns_200_and_renders_a_post_form()
+    {
+        var response = await AnonymousClient().GetAsync("/Account/Logout", TestContext.Current.CancellationToken);
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+
+        // GET only renders the confirm button; the actual sign-out is POST-only
+        // (LogoutModel.OnPostAsync -> SignOutAsync), so a cross-site GET cannot log an admin out.
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("method=\"post\"", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Cerrar sesión", body);
+    }
+
+    // ---- optional: the anonymous login GET must not hand out an auth session ----
+
+    [Fact]
+    public async Task Get_login_without_cookie_sets_no_authentication_cookie()
+    {
+        var response = await AnonymousClient().GetAsync("/Account/Login", TestContext.Current.CancellationToken);
+
+        var setCookies = response.Headers.TryGetValues("Set-Cookie", out var values)
+            ? values.ToArray()
+            : Array.Empty<string>();
+
+        // An antiforgery cookie on the GET is fine; a cookie-auth session cookie is not.
+        Assert.DoesNotContain(setCookies, c => c.StartsWith(".AspNetCore.Cookies=", StringComparison.Ordinal));
+    }
+
+    // ---- criteria 2 + 4 end to end: ?returnUrl= is reduced to a safe local path
+    //      before it is written into the hidden form field. ------------------------
+
+    [Theory]
+    [InlineData("//evil.com")]
+    [InlineData("https://evil.com")]
+    [InlineData("http:\\evil.com")]
+    [InlineData("/\\evil.com")]
+    [InlineData("javascript:alert(1)")]
+    [InlineData("   /ok")]
+    public async Task Get_login_with_hostile_returnUrl_renders_root_in_hidden_field(string returnUrl)
+    {
+        var response = await AnonymousClient()
+            .GetAsync("/Account/Login?returnUrl=" + Uri.EscapeDataString(returnUrl), TestContext.Current.CancellationToken);
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("/", HiddenReturnUrl(body));
+    }
+
+    [Theory]
+    [InlineData("/pending-review")]
+    [InlineData("/dashboard")]
+    public async Task Get_login_with_local_returnUrl_keeps_it_in_hidden_field(string returnUrl)
+    {
+        var response = await AnonymousClient()
+            .GetAsync("/Account/Login?returnUrl=" + Uri.EscapeDataString(returnUrl), TestContext.Current.CancellationToken);
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(returnUrl, HiddenReturnUrl(body));
+    }
+
+    // Pulls the value of <input type="hidden" name="returnUrl" value="..."> from the rendered page.
+    private static string HiddenReturnUrl(string html)
+    {
+        var match = Regex.Match(html, "name=\"returnUrl\"[^>]*value=\"([^\"]*)\"");
+        Assert.True(match.Success, "hidden returnUrl field not found in rendered login page");
+        return WebUtility.HtmlDecode(match.Groups[1].Value);
+    }
+
     /// <summary>
     /// Supplies a syntactically valid but unreachable connection string so
-    /// <c>ConnectionStringGuard.Require</c> (which runs in Program.cs before the host is
-    /// built) is satisfied. It is set as an environment variable rather than only via
-    /// <see cref="IWebHostBuilder.ConfigureAppConfiguration"/> because factory config
-    /// callbacks are layered in after <c>WebApplicationBuilder.Configuration</c> is read,
-    /// which is too late for that guard; the default environment-variables provider is
-    /// read as <c>CreateBuilder</c> runs. The in-memory entry below mirrors it for
-    /// anyone reading the fixture. Step 11 extends <see cref="ConfigureWebHost"/> to strip
-    /// <c>AddHostedService&lt;AdminSeeder&gt;</c> so host startup still never opens a socket.
+    /// <c>ConnectionStringGuard.Require</c> (which runs in Program.cs, reading
+    /// <c>builder.Configuration.GetConnectionString("LicensingDb")</c> before the host is
+    /// built) is satisfied. <see cref="IWebHostBuilder.UseSetting"/> writes straight into
+    /// that configuration, so no process-wide environment variable is touched. The host
+    /// never opens a socket: an anonymous request is redirected by the fallback policy
+    /// before any page resolves the <c>DbContextFactory</c>, and <c>db.invalid</c>
+    /// (RFC 6761) is unresolvable anyway.
     /// </summary>
     public sealed class PipelineFactory : WebApplicationFactory<Program>
     {
         private const string FakeConnectionString =
-            "Host=localhost;Port=5432;Database=test;Username=test;Password=test";
-
-        public PipelineFactory() =>
-            Environment.SetEnvironmentVariable("ConnectionStrings__LicensingDb", FakeConnectionString);
+            "Host=db.invalid;Database=test;Username=test;Password=test";
 
         protected override void ConfigureWebHost(IWebHostBuilder builder) =>
-            builder.ConfigureAppConfiguration(config => config.AddInMemoryCollection(
-                new Dictionary<string, string?> { ["ConnectionStrings:LicensingDb"] = FakeConnectionString }));
-
-        protected override void Dispose(bool disposing)
-        {
-            base.Dispose(disposing);
-            if (disposing)
-            {
-                Environment.SetEnvironmentVariable("ConnectionStrings__LicensingDb", null);
-            }
-        }
+            builder.UseSetting("ConnectionStrings:LicensingDb", FakeConnectionString);
     }
 }

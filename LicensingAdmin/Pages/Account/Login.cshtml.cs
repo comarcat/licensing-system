@@ -20,8 +20,10 @@ namespace LicensingAdmin.Pages.Account;
 /// non-distinguishing contract of <see cref="AdminCredentialService.ValidateAsync"/>.
 /// </summary>
 [AllowAnonymous]
-public class LoginModel(AdminCredentialService credentials, IDbContextFactory<AppDbContext> dbFactory)
-    : PageModel
+public class LoginModel(
+    AdminCredentialService credentials,
+    IDbContextFactory<AppDbContext> dbFactory,
+    ILogger<LoginModel> logger) : PageModel
 {
     /// <summary>Shown for any unsuccessful sign-in, regardless of the underlying cause.</summary>
     public const string GenericError = "Correo o contraseña no válidos.";
@@ -61,36 +63,64 @@ public class LoginModel(AdminCredentialService credentials, IDbContextFactory<Ap
         return LocalRedirect(target);
     }
 
-    // Stamp LastLoginAtUtc and drop an audit row. The principal is already built, so a
-    // race here (row deactivated between ValidateAsync and now) is caught on the next
-    // request by OnValidatePrincipal — this write is best-effort bookkeeping.
+    // Stamp LastLoginAtUtc and drop an audit row. Best-effort by contract: the principal
+    // is already built, so a transient DB failure here must not deny a login backed by
+    // valid credentials — it is logged for ops and swallowed. A row that vanished between
+    // ValidateAsync and now (concurrent delete) is caught next request by OnValidatePrincipal.
     private async Task RecordLoginAsync(string email, CancellationToken ct)
     {
-        var normalized = email.Trim().ToLowerInvariant();
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
-        var user = await db.AdminUsers
-            .OrderBy(u => u.Id)
-            .FirstOrDefaultAsync(u => u.Email.ToLower() == normalized, ct);
-        if (user is null)
+        try
         {
-            return;
-        }
+            var normalized = email.Trim().ToLowerInvariant();
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var user = await db.AdminUsers
+                .OrderBy(u => u.Id)
+                .FirstOrDefaultAsync(u => u.Email.ToLower() == normalized, ct);
+            if (user is null)
+            {
+                logger.LogWarning(
+                    "Login bookkeeping: no admin_users row for a just-authenticated principal; skipping audit stamp.");
+                return;
+            }
 
-        user.LastLoginAtUtc = DateTime.UtcNow;
-        db.AuditLogEntries.Add(new AuditLogEntry
+            user.LastLoginAtUtc = DateTime.UtcNow;
+            db.AuditLogEntries.Add(new AuditLogEntry
+            {
+                Actor = user.Email,
+                EntityType = "AdminUser",
+                EntityId = user.Id.ToString(),
+                Action = "Login",
+            });
+            await db.SaveChangesAsync(ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Actor = user.Email,
-            EntityType = "AdminUser",
-            EntityId = user.Id.ToString(),
-            Action = "Login",
-        });
-        await db.SaveChangesAsync(ct);
+            logger.LogError(ex,
+                "Login bookkeeping (LastLoginAtUtc + audit row) failed; sign-in proceeds.");
+        }
     }
 
-    // Url.IsLocalUrl rejects absolute URLs and "//host" protocol-relative URLs, so a
-    // crafted ?returnUrl= cannot bounce a freshly signed-in admin off-site.
-    private string Local(string? returnUrl) =>
-        !string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl) ? returnUrl : "/";
+    // Url.IsLocalUrl only inspects the first two characters, so a returnUrl with an
+    // embedded tab/newline ("/\t/evil.com") slips through and a browser re-reads it as a
+    // protocol-relative "//evil.com". Reject any control or whitespace character first,
+    // then fall back to IsLocalUrl for absolute / "//host" / "/\host" forms.
+    private string Local(string? returnUrl)
+    {
+        if (string.IsNullOrEmpty(returnUrl))
+        {
+            return "/";
+        }
+
+        foreach (var c in returnUrl)
+        {
+            if (char.IsControl(c) || char.IsWhiteSpace(c))
+            {
+                return "/";
+            }
+        }
+
+        return Url.IsLocalUrl(returnUrl) ? returnUrl : "/";
+    }
 
     public sealed class InputModel
     {
