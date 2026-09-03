@@ -129,7 +129,7 @@
       "LicensingCore/Crypto/LicenseSigner.cs",
       "LicensingSystem.Tests/LicenseSignerTests.cs"
     ],
-    "status": "in_progress"
+    "status": "done"
   },
   {
     "id": "E1-T6",

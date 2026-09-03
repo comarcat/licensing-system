@@ -15,7 +15,15 @@ public interface ILicenseSigner
 
     /// <summary>
     /// Verifies <paramref name="signature"/> against the license's canonical bytes using
-    /// the supplied <paramref name="publicKey"/>. Returns <c>false</c> for any mismatch.
+    /// the supplied <paramref name="publicKey"/>.
     /// </summary>
+    /// <returns>
+    /// <c>false</c> (without throwing) when the signature was produced by a different key,
+    /// when <paramref name="signature"/> is <c>null</c>, when it has length 0, or when it is
+    /// otherwise malformed.
+    /// </returns>
+    /// <exception cref="ArgumentNullException">
+    /// Thrown when <paramref name="license"/> or <paramref name="publicKey"/> is <c>null</c>.
+    /// </exception>
     bool Verify(License license, byte[] signature, RSA publicKey);
 }

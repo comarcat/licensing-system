@@ -39,6 +39,10 @@ public class LicenseSignerTests
         return pub;
     }
 
+    // ---------------------------------------------------------------------
+    // Acceptance criterion 1 — round-trip with the matching key.
+    // ---------------------------------------------------------------------
+
     [Fact]
     public void SignThenVerify_WithMatchingKey_ReturnsTrue()
     {
@@ -60,6 +64,10 @@ public class LicenseSignerTests
 
         Assert.True(signer.Verify(license, signature, MatchingPublicKey()));
     }
+
+    // ---------------------------------------------------------------------
+    // Acceptance criterion 2 — mutating any canonical field breaks Verify.
+    // ---------------------------------------------------------------------
 
     [Fact]
     public void Verify_AfterMutatingAnyCanonicalField_ReturnsFalse()
@@ -98,6 +106,12 @@ public class LicenseSignerTests
         Assert.False(signer.Verify(byExpiry, expirySig, pub));
     }
 
+    // ---------------------------------------------------------------------
+    // Acceptance criterion 3 — Verify input hardening (M-1):
+    //   different key / null / zero-length / malformed signature => false, no throw;
+    //   null license / null publicKey => ArgumentNullException.
+    // ---------------------------------------------------------------------
+
     [Fact]
     public void Verify_WithDifferentPublicKey_ReturnsFalse()
     {
@@ -113,36 +127,14 @@ public class LicenseSignerTests
     }
 
     [Fact]
-    public void CanonicalBytes_WithExpiry_IsExactPipeDelimitedString()
+    public void Verify_WithNullSignature_ReturnsFalse()
     {
+        var signer = new LicenseSigner(_rsa);
         var license = NewLicenseWithExpiry();
-        var expected = FormattableString.Invariant(
-            $"{license.LicenseKey}|{license.ProductId:D}|{(int)license.ModelSnapshot}|{license.MaxActivations}|{license.SubscriptionExpiryUtc:O}");
 
-        var actual = Encoding.UTF8.GetString(LicenseSigner.CanonicalBytes(license));
-
-        Assert.Equal(expected, actual);
+        // M-1: a null signature is a caller mistake / tampering, not an exception path.
+        Assert.False(signer.Verify(license, null!, MatchingPublicKey()));
     }
-
-    [Fact]
-    public void CanonicalBytes_WithoutExpiry_EndsWithEmptyTrailingField()
-    {
-        var license = NewLicenseWithoutExpiry();
-        var expected = FormattableString.Invariant(
-            $"{license.LicenseKey}|{license.ProductId:D}|{(int)license.ModelSnapshot}|{license.MaxActivations}|");
-
-        var actual = Encoding.UTF8.GetString(LicenseSigner.CanonicalBytes(license));
-
-        Assert.Equal(expected, actual);
-        Assert.EndsWith("|", actual);
-    }
-
-    // ---------------------------------------------------------------------
-    // E1-T5 review additions (tester): robustness / edge coverage beyond the
-    // 5 acceptance criteria. All deterministic and fast.
-    // ---------------------------------------------------------------------
-
-    // --- signature shape: malformed / empty / null -----------------------
 
     [Fact]
     public void Verify_WithEmptySignature_ReturnsFalse()
@@ -150,8 +142,6 @@ public class LicenseSignerTests
         var signer = new LicenseSigner(_rsa);
         var license = NewLicenseWithExpiry();
 
-        // RSA.VerifyData returns false (does not throw) for a non-null but
-        // structurally invalid signature.
         Assert.False(signer.Verify(license, Array.Empty<byte>(), MatchingPublicKey()));
     }
 
@@ -175,19 +165,204 @@ public class LicenseSignerTests
     }
 
     [Fact]
-    public void Verify_WithNullSignature_Throws()
+    public void Verify_WithCorrectLengthAllOnesSignature_ReturnsFalseWithoutThrowing()
     {
         var signer = new LicenseSigner(_rsa);
         var license = NewLicenseWithExpiry();
 
-        // Documented behaviour: LicenseSigner.Verify is a thin wrapper over
-        // RSA.VerifyData, which throws ArgumentNullException on a null signature
-        // rather than returning false. Callers must not pass null.
-        Assert.Throws<ArgumentNullException>(
-            () => signer.Verify(license, null!, MatchingPublicKey()));
+        var garbage = new byte[256];
+        Array.Fill(garbage, (byte)0xFF);
+
+        // Some runtimes surface this as a CryptographicException from VerifyData;
+        // LicenseSigner.Verify must swallow it and return false.
+        Assert.False(signer.Verify(license, garbage, MatchingPublicKey()));
     }
 
-    // --- determinism / stability ---------------------------------------------
+    [Fact]
+    public void Verify_WithNullLicense_ThrowsArgumentNullException()
+    {
+        var signer = new LicenseSigner(_rsa);
+        var signature = signer.Sign(NewLicenseWithExpiry());
+
+        Assert.Throws<ArgumentNullException>(
+            () => signer.Verify(null!, signature, MatchingPublicKey()));
+    }
+
+    [Fact]
+    public void Verify_WithNullPublicKey_ThrowsArgumentNullException()
+    {
+        var signer = new LicenseSigner(_rsa);
+        var license = NewLicenseWithExpiry();
+        var signature = signer.Sign(license);
+
+        Assert.Throws<ArgumentNullException>(
+            () => signer.Verify(license, signature, null!));
+    }
+
+    // ---------------------------------------------------------------------
+    // Acceptance criterion 4 — exact canonical string, new licsig-v1 format
+    // with UTC-normalized, second-truncated expiry (yyyy-MM-ddTHH:mm:ss'Z').
+    // ---------------------------------------------------------------------
+
+    [Fact]
+    public void CanonicalBytes_StartsWithDomainPrefix()
+    {
+        // M-2: domain separation from LicenseFileService signatures.
+        var actual = Encoding.UTF8.GetString(LicenseSigner.CanonicalBytes(NewLicenseWithExpiry()));
+
+        Assert.StartsWith("licsig-v1|", actual);
+    }
+
+    [Fact]
+    public void CanonicalBytes_WithExpiry_IsExactPipeDelimitedString()
+    {
+        var license = NewLicenseWithExpiry();
+        var expiry = license.SubscriptionExpiryUtc!.Value;
+        var expected = FormattableString.Invariant(
+            $"licsig-v1|{license.LicenseKey}|{license.ProductId:D}|{(int)license.ModelSnapshot}|{license.MaxActivations}|{expiry:yyyy-MM-ddTHH:mm:ss'Z'}");
+
+        var actual = Encoding.UTF8.GetString(LicenseSigner.CanonicalBytes(license));
+
+        Assert.Equal(expected, actual);
+        Assert.Equal("licsig-v1|ABCD-EFGHJ-KLMN-PQRS-TUVW-XYZ2-34|11111111-2222-3333-4444-555555555555|9|7|2027-06-01T12:30:45Z", actual);
+    }
+
+    [Fact]
+    public void CanonicalBytes_WithoutExpiry_EndsWithEmptyTrailingField()
+    {
+        var license = NewLicenseWithoutExpiry();
+        var expected = FormattableString.Invariant(
+            $"licsig-v1|{license.LicenseKey}|{license.ProductId:D}|{(int)license.ModelSnapshot}|{license.MaxActivations}|");
+
+        var actual = Encoding.UTF8.GetString(LicenseSigner.CanonicalBytes(license));
+
+        Assert.Equal(expected, actual);
+        Assert.EndsWith("|", actual);
+    }
+
+    [Fact]
+    public void CanonicalBytes_UtcExpiry_EndsWithZ()
+    {
+        var license = NewLicenseWithExpiry();
+        license.SubscriptionExpiryUtc = new DateTime(2027, 6, 1, 12, 30, 45, DateTimeKind.Utc);
+
+        var actual = Encoding.UTF8.GetString(LicenseSigner.CanonicalBytes(license));
+
+        Assert.EndsWith("|2027-06-01T12:30:45Z", actual);
+    }
+
+    [Fact]
+    public void CanonicalBytes_TruncatesSubSecondPrecision()
+    {
+        var license = NewLicenseWithExpiry();
+        license.SubscriptionExpiryUtc =
+            new DateTime(2027, 6, 1, 12, 30, 45, DateTimeKind.Utc).AddTicks(9_999_999);
+
+        var actual = Encoding.UTF8.GetString(LicenseSigner.CanonicalBytes(license));
+
+        Assert.EndsWith("|2027-06-01T12:30:45Z", actual);
+    }
+
+    [Fact]
+    public void CanonicalBytes_UnspecifiedExpiry_TreatedAsUtc_NotShifted()
+    {
+        var utc = NewLicenseWithExpiry();
+        utc.SubscriptionExpiryUtc = new DateTime(2027, 6, 1, 12, 30, 45, DateTimeKind.Utc);
+
+        var unspecified = NewLicenseWithExpiry();
+        unspecified.SubscriptionExpiryUtc =
+            new DateTime(2027, 6, 1, 12, 30, 45, DateTimeKind.Unspecified);
+
+        Assert.Equal(
+            Encoding.UTF8.GetString(LicenseSigner.CanonicalBytes(utc)),
+            Encoding.UTF8.GetString(LicenseSigner.CanonicalBytes(unspecified)));
+    }
+
+    [Fact]
+    public void CanonicalBytes_LocalExpiry_ConvertedToUtc()
+    {
+        var instant = new DateTime(2027, 6, 1, 12, 30, 45, DateTimeKind.Utc);
+
+        var utc = NewLicenseWithExpiry();
+        utc.SubscriptionExpiryUtc = instant;
+
+        var local = NewLicenseWithExpiry();
+        local.SubscriptionExpiryUtc = instant.ToLocalTime();
+
+        Assert.Equal(
+            Encoding.UTF8.GetString(LicenseSigner.CanonicalBytes(utc)),
+            Encoding.UTF8.GetString(LicenseSigner.CanonicalBytes(local)));
+    }
+
+    // ---------------------------------------------------------------------
+    // Acceptance criterion 5 — same instant signed as Unspecified / Utc /
+    // Local / truncated-to-seconds => identical signature and Verify == true.
+    // ---------------------------------------------------------------------
+
+    [Fact]
+    public void Sign_SameInstant_AcrossKindsAndSubSecond_ProducesIdenticalSignatureAndVerifies()
+    {
+        var signer = new LicenseSigner(_rsa);
+        var pub = MatchingPublicKey();
+
+        // A UTC instant carrying sub-second precision that a DB round-trip would drop.
+        var baseUtc = new DateTime(2027, 6, 1, 12, 30, 45, DateTimeKind.Utc).AddTicks(1_234_567);
+
+        License WithExpiry(DateTime expiry)
+        {
+            var l = NewLicenseWithExpiry();
+            l.SubscriptionExpiryUtc = expiry;
+            return l;
+        }
+
+        var original = WithExpiry(baseUtc);
+        var originalSig = signer.Sign(original);
+
+        var variants = new[]
+        {
+            baseUtc,                                                   // Utc, sub-second
+            DateTime.SpecifyKind(baseUtc, DateTimeKind.Unspecified),   // Unspecified (treated as UTC)
+            baseUtc.ToLocalTime(),                                     // Local, same instant
+            new DateTime(                                              // truncated to whole seconds
+                baseUtc.Ticks - (baseUtc.Ticks % TimeSpan.TicksPerSecond), DateTimeKind.Utc),
+        };
+
+        foreach (var v in variants)
+        {
+            var license = WithExpiry(v);
+
+            // RSA PKCS#1 v1.5 is deterministic: identical canonical bytes => identical signature.
+            Assert.Equal(originalSig, signer.Sign(license));
+            Assert.True(signer.Verify(license, originalSig, pub));
+        }
+
+        Assert.EndsWith(
+            "|2027-06-01T12:30:45Z",
+            Encoding.UTF8.GetString(LicenseSigner.CanonicalBytes(original)));
+    }
+
+    [Theory]
+    [InlineData(DateTimeKind.Utc)]
+    [InlineData(DateTimeKind.Unspecified)]
+    [InlineData(DateTimeKind.Local)]
+    public void SignThenVerify_RoundTrips_RegardlessOfExpiryKind(DateTimeKind kind)
+    {
+        var signer = new LicenseSigner(_rsa);
+        var license = NewLicenseWithExpiry();
+        license.SubscriptionExpiryUtc =
+            DateTime.SpecifyKind(new DateTime(2027, 6, 1, 12, 30, 45), kind);
+
+        var signature = signer.Sign(license);
+
+        // CanonicalBytes normalises every Kind to UTC before formatting, so the
+        // in-memory round-trip holds for all three Kinds.
+        Assert.True(signer.Verify(license, signature, MatchingPublicKey()));
+    }
+
+    // ---------------------------------------------------------------------
+    // Robustness / edge coverage beyond the acceptance criteria.
+    // All deterministic and fast.
+    // ---------------------------------------------------------------------
 
     [Fact]
     public void Sign_IsDeterministic_ForPkcs1V15()
@@ -209,77 +384,6 @@ public class LicenseSignerTests
 
         Assert.Equal(LicenseSigner.CanonicalBytes(license), LicenseSigner.CanonicalBytes(license));
     }
-
-    // --- DateTime.Kind and the "O" round-trip format ------------------------
-
-    [Fact]
-    public void CanonicalBytes_UtcExpiry_EndsWithZ()
-    {
-        var license = NewLicenseWithExpiry();
-        license.SubscriptionExpiryUtc = new DateTime(2027, 6, 1, 12, 30, 45, DateTimeKind.Utc);
-
-        var actual = Encoding.UTF8.GetString(LicenseSigner.CanonicalBytes(license));
-
-        Assert.EndsWith("Z", actual);
-    }
-
-    [Fact]
-    public void CanonicalBytes_ExpiryFormat_DependsOnDateTimeKind()
-    {
-        // Same wall-clock ticks, three Kinds -> "O" emits three different suffixes.
-        var ticks = new DateTime(2027, 6, 1, 12, 30, 45);
-
-        var utc = NewLicenseWithExpiry();
-        utc.SubscriptionExpiryUtc = DateTime.SpecifyKind(ticks, DateTimeKind.Utc);
-        var unspecified = NewLicenseWithExpiry();
-        unspecified.SubscriptionExpiryUtc = DateTime.SpecifyKind(ticks, DateTimeKind.Unspecified);
-        var local = NewLicenseWithExpiry();
-        local.SubscriptionExpiryUtc = DateTime.SpecifyKind(ticks, DateTimeKind.Local);
-
-        // Compare only the expiry field (everything after the final '|').
-        string ExpiryField(License l) =>
-            Encoding.UTF8.GetString(LicenseSigner.CanonicalBytes(l)).Split('|')[^1];
-
-        var utcExpiry = ExpiryField(utc);
-        var unspecifiedExpiry = ExpiryField(unspecified);
-        var localExpiry = ExpiryField(local);
-
-        // Utc -> trailing 'Z'; Unspecified -> no zone marker at all.
-        Assert.EndsWith("Z", utcExpiry);
-        Assert.False(unspecifiedExpiry.EndsWith("Z", StringComparison.Ordinal));
-        Assert.NotEqual(utcExpiry, unspecifiedExpiry);
-
-        // Timezone-independent assertions: each field equals the value re-rendered
-        // with the same invariant "O" specifier for that Kind.
-        Assert.Equal(
-            DateTime.SpecifyKind(ticks, DateTimeKind.Unspecified).ToString("O", CultureInfo.InvariantCulture),
-            unspecifiedExpiry);
-        Assert.Equal(
-            DateTime.SpecifyKind(ticks, DateTimeKind.Local).ToString("O", CultureInfo.InvariantCulture),
-            localExpiry);
-    }
-
-    [Theory]
-    [InlineData(DateTimeKind.Utc)]
-    [InlineData(DateTimeKind.Unspecified)]
-    [InlineData(DateTimeKind.Local)]
-    public void SignThenVerify_RoundTrips_RegardlessOfExpiryKind(DateTimeKind kind)
-    {
-        var signer = new LicenseSigner(_rsa);
-        var license = NewLicenseWithExpiry();
-        license.SubscriptionExpiryUtc =
-            DateTime.SpecifyKind(new DateTime(2027, 6, 1, 12, 30, 45), kind);
-
-        var signature = signer.Sign(license);
-
-        // Round-trip holds for any Kind as long as the in-memory License is unchanged.
-        // NOTE (known gap): if the License is persisted and reloaded with a different
-        // Kind (e.g. Npgsql returns Unspecified), the "O" text changes and Verify
-        // would fail. CanonicalBytes does not normalise to UTC. See review notes.
-        Assert.True(signer.Verify(license, signature, MatchingPublicKey()));
-    }
-
-    // --- ModelSnapshot values ---------------------------------------------
 
     [Fact]
     public void SignThenVerify_WithModelSnapshotNone_RoundTripsAndCanonicalUsesZero()
@@ -321,8 +425,6 @@ public class LicenseSignerTests
         Assert.False(signer.Verify(license, signature, MatchingPublicKey()));
     }
 
-    // --- MaxActivations boundary values ------------------------------------
-
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]
@@ -355,8 +457,6 @@ public class LicenseSignerTests
         Assert.False(signer.Verify(license, signature, MatchingPublicKey()));
     }
 
-    // --- ProductId / LicenseKey edge values -------------------------------
-
     [Fact]
     public void SignThenVerify_WithEmptyProductId_RoundTrips()
     {
@@ -373,7 +473,7 @@ public class LicenseSignerTests
     }
 
     [Fact]
-    public void SignThenVerify_WithEmptyLicenseKey_RoundTripsAndCanonicalStartsWithPipe()
+    public void SignThenVerify_WithEmptyLicenseKey_RoundTripsAndCanonicalKeepsEmptyField()
     {
         var signer = new LicenseSigner(_rsa);
         var license = NewLicenseWithoutExpiry();
@@ -382,7 +482,7 @@ public class LicenseSignerTests
         var signature = signer.Sign(license);
 
         Assert.True(signer.Verify(license, signature, MatchingPublicKey()));
-        Assert.StartsWith("|", Encoding.UTF8.GetString(LicenseSigner.CanonicalBytes(license)));
+        Assert.StartsWith("licsig-v1||", Encoding.UTF8.GetString(LicenseSigner.CanonicalBytes(license)));
     }
 
     [Fact]
@@ -397,14 +497,12 @@ public class LicenseSignerTests
 
         var canonical = Encoding.UTF8.GetString(LicenseSigner.CanonicalBytes(license));
 
-        Assert.StartsWith("AAAA|1111-2222|9|", canonical);
+        Assert.StartsWith("licsig-v1|AAAA|1111-2222|9|", canonical);
 
         var signer = new LicenseSigner(_rsa);
         var signature = signer.Sign(license);
         Assert.True(signer.Verify(license, signature, MatchingPublicKey()));
     }
-
-    // --- expiry presence toggling ---------------------------------------
 
     [Fact]
     public void Verify_AfterSettingExpiryThatWasNull_ReturnsFalse()
@@ -429,8 +527,6 @@ public class LicenseSignerTests
 
         Assert.False(signer.Verify(license, signature, MatchingPublicKey()));
     }
-
-    // --- key material variants ------------------------------------------
 
     [Fact]
     public void Verify_AcceptsAnRsaInstanceThatAlsoHoldsPrivateParameters()
