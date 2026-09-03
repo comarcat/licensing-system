@@ -1,4 +1,5 @@
 using LicensingAdmin.Auth;
+using LicensingAdmin.Startup;
 using LicensingCore.Configuration;
 using LicensingCore.Data;
 using LicensingCore.Entities;
@@ -90,6 +91,10 @@ builder.Services.AddScoped<IAdminUserLookup, EfAdminUserLookup>();
 builder.Services.AddScoped<AdminCredentialService>();
 // Server-side Blazor: revalidate the circuit's principal against the DB every 30 min.
 builder.Services.AddScoped<AuthenticationStateProvider, AdminAuthStateProvider>();
+
+// Seeds the first SuperAdmin on startup from Admin:BootstrapEmail / Admin:BootstrapPassword
+// when admin_users is empty; a no-op once a real admin exists or the config is absent.
+builder.Services.AddHostedService<AdminSeeder>();
 
 var app = builder.Build();
 
