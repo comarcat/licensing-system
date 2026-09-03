@@ -77,6 +77,14 @@ else
     private async Task Resolve(Activation activation, bool approve)
     {
         var reviewer = CurrentAdmin.Email((await AuthState.GetAuthenticationStateAsync()).User);
+        if (string.IsNullOrWhiteSpace(reviewer))
+        {
+            // Auth state flipped to anonymous mid-circuit (account disabled / re-validated).
+            // Refuse rather than stamp an activation and an audit row with no attributable
+            // actor — same non-repudiation guard as LicenseIssuanceService (IssuedBy).
+            Snackbar.Add("Tu sesión ya no es válida. Vuelve a iniciar sesión.", Severity.Error);
+            return;
+        }
 
         await using var db = await DbFactory.CreateDbContextAsync();
         var entity = await db.Activations.FirstOrDefaultAsync(a => a.Id == activation.Id);
