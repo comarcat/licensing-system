@@ -294,7 +294,8 @@
       "LicensingAdmin/Startup/AdminSeeder.cs",
       "LicensingSystem.Tests/AdminSeederTests.cs",
       "LicensingAdmin/Program.cs",
-      "LicensingSystem.Tests/AuthorizationPipelineTests.cs"
+      "LicensingSystem.Tests/AuthorizationPipelineTests.cs",
+      "LicensingSystem.Tests/GateScreensPipelineTests.cs"
     ],
     "status": "pending"
   },
@@ -416,7 +417,7 @@
     "dependencies": ["E2-T6", "E2-T7"],
     "priority": "p0",
     "acceptance": [
-      "WHEN `dotnet build LicensingSystem.sln -warnaserror` runs THE SYSTEM SHALL exit 0 with no analyzer warning escalated to an error.",
+      "WHEN `dotnet build LicensingSystem.sln -warnaserror` runs THE SYSTEM SHALL exit 0 with no analyzer warning escalated to an error, including the two pre-existing ones this step clears: `MUD0002` in `LicensingAdmin/Pages/PendingReview.razor` (`AlignItems` on `MudGrid`) and `xUnit2012` in `LicensingSystem.Tests/CurrentAdminEmailEdgeCasesTests.cs`.",
       "WHEN `dotnet test` runs the full suite THE SYSTEM SHALL exit 0 with 0 failed and 0 skipped.",
       "WHEN `grep -RIl \"support-staff@vendor.com\" LicensingAdmin/` runs THE SYSTEM SHALL find no match and exit 1.",
       "WHEN `git grep -n \"Password=***REDACTED***\" -- ':!docs/blueprint' ':!tasks.json'` runs THE SYSTEM SHALL find no match and exit 1.",
@@ -430,7 +431,9 @@
     ],
     "checkpoint": "step-16-smoke",
     "files": [
-      "LicensingSystem.Tests/SmokeTests.cs"
+      "LicensingSystem.Tests/SmokeTests.cs",
+      "LicensingAdmin/Pages/PendingReview.razor",
+      "LicensingSystem.Tests/CurrentAdminEmailEdgeCasesTests.cs"
     ],
     "status": "pending"
   }

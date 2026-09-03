@@ -295,7 +295,8 @@ posterior.
 - `LicensingAdmin/Startup/AdminSeeder.cs` — nuevo
 - `LicensingSystem.Tests/AdminSeederTests.cs` — nuevo: clase `AdminSeederTests`
 - `LicensingAdmin/Program.cs` — edit: `AddHostedService<AdminSeeder>()`
-- `LicensingSystem.Tests/AuthorizationPipelineTests.cs` — edit: quita el `AdminSeeder` en `ConfigureTestServices`
+- `LicensingSystem.Tests/AuthorizationPipelineTests.cs` — edit: quita el `AdminSeeder` en `ConfigureTestServices` (helper compartido `WithoutAdminSeeder()`)
+- `LicensingSystem.Tests/GateScreensPipelineTests.cs` — edit: **toda** `WebApplicationFactory<Program>` de la suite hereda el `AddHostedService<AdminSeeder>()`, así que sus factories también deben aplicar `WithoutAdminSeeder()` o el host de test intentaría sembrar contra la cadena ficticia
 
 **Acceptance**
 
@@ -508,12 +509,21 @@ con `LicenseKeyGenerator.NewKey()` y aserta que casa la misma regex que
 completa. El conteo de tags se aserta en el bloque **Checkpoint**, después del propio `git tag` de
 este paso — un `Verify` no puede depender de lo que produce su propio `Checkpoint`.
 
+**En el mismo commit**, cierra los 2 warnings-as-errors preexistentes que hacen fallar
+`dotnet build -warnaserror` (puerta de este paso, criterio 1): `MUD0002` en
+`LicensingAdmin/Pages/PendingReview.razor` (`AlignItems` en `MudGrid` — quitar el atributo o
+`Justify`) y `xUnit2012` en `LicensingSystem.Tests/CurrentAdminEmailEdgeCasesTests.cs`
+(`Assert.Contains`/`Assert.Single` mal usados — usar la sobrecarga tipada). Son fixes de lint, no
+lógica de producto.
+
 **Files**
 - `LicensingSystem.Tests/SmokeTests.cs` — edit: aserción de regresión
+- `LicensingAdmin/Pages/PendingReview.razor` — edit: cerrar `MUD0002`
+- `LicensingSystem.Tests/CurrentAdminEmailEdgeCasesTests.cs` — edit: cerrar `xUnit2012`
 
 **Acceptance**
 
-1. **WHEN** `dotnet build LicensingSystem.sln -warnaserror` runs **THE SYSTEM SHALL** exit 0 with no analyzer warning escalated to an error.
+1. **WHEN** `dotnet build LicensingSystem.sln -warnaserror` runs **THE SYSTEM SHALL** exit 0 with no analyzer warning escalated to an error, including the two pre-existing ones this step clears: `MUD0002` in `LicensingAdmin/Pages/PendingReview.razor` and `xUnit2012` in `LicensingSystem.Tests/CurrentAdminEmailEdgeCasesTests.cs`.
 2. **WHEN** `dotnet test` runs the full suite **THE SYSTEM SHALL** exit 0 with 0 failed and 0 skipped.
 3. **WHEN** `grep -RIl "support-staff@vendor.com" LicensingAdmin/` runs **THE SYSTEM SHALL** find no match and exit 1.
 4. **WHEN** `git grep -n "Password=***REDACTED***" -- ':!docs/blueprint' ':!tasks.json'` runs **THE SYSTEM SHALL** find no match and exit 1.

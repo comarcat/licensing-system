@@ -1972,6 +1972,7 @@ Más estas puertas manuales, cada una comprobada una vez antes de publicar:
 | 15 | `AdminUser.Email` se **normaliza en la escritura** (minúsculas + `Trim()`) — el seeder (paso 11) lo hace en `BuildSuperAdmin` y en la ruta de seed; `AdminUserService` (paso 15) hará lo mismo. `EfAdminUserLookup` sigue comparando `u.Email.ToLower() == normalized` en este slice | Índice funcional `lower("Email")` vía migración, o dejar el desajuste de mayúsculas | El índice único de `admin_users.Email` es case-sensitive; normalizar en la escritura da unicidad efectiva case-insensitive sin migración (Non-Goal §1). El predicado no-sargable es un seq scan barato en un panel interno de bajo volumen | Se añade CI/carga que haga notar el seq scan por request autenticada → predicado `u.Email == normalized` + índice; o entran migraciones EF (§20.4) |
 | 16 | Riesgo aceptado en este slice: `AdminRole.SuperAdmin = 0` (== `default(AdminRole)`) y `AdminUser.Role` se materializa sin `Enum.IsDefined` | Reordenar `Enums.cs` a `ReadOnlyViewer = 0` + `Enum.IsDefined` al leer la fila | La columna usa `HasConversion<string>()` (no guarda el ordinal) y toda ruta de creación fija `Role` explícitamente (seeder → `SuperAdmin` a propósito; `AdminUserService` lo pedirá); el hueco `(AdminRole)99` sólo da un principal con `FallbackPolicy`. Endurecerlo toca `LicensingCore/Entities/Enums.cs`, fuera de los `files` de E2-T1/E2-T3 | Slice de hardening (§20.4 #9); o una inserción de `AdminUser` sin fijar `Role` entra en el código |
 | 17 | `LicenseIssuanceRequest` reusa `int MaxActivations` para `SoftwareProduct.DefaultMaxActivations` del producto nuevo | Un campo separado `int? NewProductDefaultMaxActivations` (como listaba el paso 13) | El default del producto = el tope de la primera licencia emitida es un valor de partida razonable y ahorra un campo del formulario de E2-T6; siempre editable luego en el producto | Se necesite emitir la primera licencia de un producto con un tope distinto del default del producto |
+| 18 | `New.razor` (E2-T6) lleva `@namespace LicensingAdmin.Pages.NewLicense` explícito | Dejar el namespace por convención de carpeta (`LicensingAdmin.Pages.Licenses`) | La carpeta `Pages/Licenses/` deriva `LicensingAdmin.Pages.Licenses`, que **colisiona** con el tipo generado de `Pages/Licenses.razor` (la pantalla de lista) → no compila. El `@namespace` explícito lo resuelve sin mover archivos; la ruta `@page "/licenses/new"` y el `grep -q` del verify no se ven afectados | Se mueva `Licenses.razor` a su propia carpeta o se renombre uno de los dos |
 
 ### 20.4 What to build next
 
@@ -2018,6 +2019,23 @@ Del §1 Non-Goals y de los hallazgos diferidos del build, en orden:
     `Trim()` + acotar longitud de `CustomerEmail` (≤320) / `CustomerName` (≤200) antes de EF.
     (E2-T6 ya impone el mínimo de 1 en `MaxActivations` en `New.razor`.) Disparador: la pantalla
     de emisión entra en uso real, o el siguiente slice que toque `Licensing/`.
+13. **[PRIORIDAD] Chequeo de autorización fresco antes de un write en un circuito Blazor vivo.**
+    El `@attribute [Authorize]` y `AuthorizeAsync(user, policy)` evalúan los claims del principal
+    del circuito, que el `RevalidatingServerAuthenticationStateProvider` sólo refresca cada 30 min
+    (`OnValidatePrincipal` sólo corre en peticiones HTTP, no en mensajes SignalR) → ventana de
+    ≤30 min en la que un admin degradado/desactivado con el circuito abierto puede seguir
+    escribiendo. Aceptado como diseño para E2-T4 (`PendingReview.Resolve`, acción recuperable +
+    revocación online), pero **`New.razor::SubmitAsync` emite un artefacto criptográfico
+    irreversible** (licencia RSA-firmada, válida offline; la firma no cubre `IssuedAtUtc`, §20.3
+    #11). Fix real (no `AuthorizeAsync`, que re-lee los mismos claims stale): `IAdminUserLookup.
+    FindByEmailAsync` + comprobar `IsActive` + rol justo antes de `IssueAsync` — aplicar también a
+    `PendingReview.Resolve`. Disparador: **antes de que el panel emita licencias reales**.
+14. **Runbook de bootstrap del primer admin.** `Admin:BootstrapEmail` / `Admin:BootstrapPassword`
+    (E2-T3): documentar que el password DEBE ser un secreto aleatorio de alta entropía y retirarse
+    de la configuración tras el primer arranque (el `LogWarning` del seeder ya lo recuerda); el
+    email se persiste como identidad de login del `SuperAdmin` sin validación de formato. `ShouldSeed`
+    no impone un suelo de robustez a propósito (rompería su criterio de aceptación 1). Disparador:
+    redactar la guía de despliegue del host.
 
 ---
 
