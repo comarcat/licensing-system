@@ -6,7 +6,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>
     <OutputType>Exe</OutputType>
-    <VSTestTreatNoTestsAsError>true</VSTestTreatNoTestsAsError>
+    <!-- INFRA #1: point VSTest at .runsettings whose TreatNoTestsAsError is the
+         setting that actually blocks a filter matching nothing. -->
+    <RunSettingsFilePath>$(MSBuildThisFileDirectory).runsettings</RunSettingsFilePath>
   </PropertyGroup>
 
   <ItemGroup>
