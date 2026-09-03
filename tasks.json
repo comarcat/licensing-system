@@ -138,11 +138,11 @@
     "dependencies": ["E1-T5"],
     "priority": "p0",
     "acceptance": [
-      "WHEN `AddLicenseSigner(services, config)` runs with `Crypto:RsaPrivateKeyPem` set to a valid PEM THE SYSTEM SHALL register `ILicenseSigner` such that `GetRequiredService<ILicenseSigner>()` resolves without throwing.",
-      "WHEN `AddLicenseSigner(services, config)` runs with no `Crypto:RsaPrivateKeyPem` configured THE SYSTEM SHALL still resolve `ILicenseSigner` using an in-memory RSA key and SHALL log one warning.",
-      "WHEN `dotnet build LicensingSystem.sln` runs THE SYSTEM SHALL exit 0.",
-      "WHEN `LicensingAdmin/Program.cs` is inspected THE SYSTEM SHALL call `AddLicenseSigner(...)` exactly once.",
-      "WHEN `dotnet test --filter CryptoRegistration` runs THE SYSTEM SHALL report all `CryptoRegistrationTests` tests passed, 0 failed (the filter token contains no substring that also selects `LicenseSignerTests`)."
+      "WHEN `AddLicenseSigner(services, config, env)` runs with `Crypto:RsaPrivateKeyPem` set to a valid RSA private-key PEM THE SYSTEM SHALL register `ILicenseSigner` such that `GetRequiredService<ILicenseSigner>()` resolves without throwing.",
+      "WHEN `AddLicenseSigner(services, config, env)` runs with `Crypto:RsaPrivateKeyPem` blank AND `env.IsDevelopment()` THE SYSTEM SHALL resolve `ILicenseSigner` with an in-memory RSA key and SHALL log exactly one warning; WHEN blank AND NOT `IsDevelopment()` THE SYSTEM SHALL throw `InvalidOperationException` at registration time (before `builder.Build()`) whose message names `Crypto:RsaPrivateKeyPem` and never contains key material.",
+      "WHEN `Crypto:RsaPrivateKeyPem` is set but is malformed, a public-key-only PEM, or an RSA key shorter than 2048 bits THE SYSTEM SHALL throw `InvalidOperationException` at registration time naming `Crypto:RsaPrivateKeyPem` (never dumping the value), not fail lazily on the first `Sign`.",
+      "WHEN `LicensingAdmin/Program.cs` is inspected THE SYSTEM SHALL call `AddLicenseSigner(builder.Configuration, builder.Environment)` exactly once, and the fallback warning SHALL use a typed logger category (`ILogger<CryptoRegistration>` / `typeof(CryptoRegistration).FullName`), not a string literal.",
+      "WHEN `dotnet build LicensingSystem.sln` runs THE SYSTEM SHALL exit 0 and `dotnet test --filter CryptoRegistration` SHALL report all `CryptoRegistrationTests` passed, 0 failed (the filter token selects no `LicenseSignerTests`)."
     ],
     "verify": [
       "dotnet build LicensingSystem.sln",
@@ -188,16 +188,17 @@
     "priority": "p0",
     "acceptance": [
       "WHEN `AuthPolicies` is inspected THE SYSTEM SHALL expose `ViewerAccess`, `ReviewAccess`, `IssueAccess`, `AdminUserAccess` as string constants.",
-      "WHEN a `ClaimsPrincipal` in role `ReadOnlyViewer` is checked THE SYSTEM SHALL satisfy `ViewerAccess` and fail `ReviewAccess`, `IssueAccess`, `AdminUserAccess`.",
-      "WHEN a `ClaimsPrincipal` in role `SupportStaff` is checked THE SYSTEM SHALL satisfy `ViewerAccess`, `ReviewAccess`, `IssueAccess` and fail `AdminUserAccess`.",
+      "WHEN a `ClaimsPrincipal` in role `ReadOnlyViewer` is checked THE SYSTEM SHALL satisfy only `ViewerAccess`; in role `SupportStaff` THE SYSTEM SHALL satisfy `ViewerAccess`, `ReviewAccess`, `IssueAccess` and fail `AdminUserAccess`.",
       "WHEN a `ClaimsPrincipal` in role `SuperAdmin` is checked THE SYSTEM SHALL satisfy all four policies, and WHEN an unauthenticated `ClaimsPrincipal` is checked THE SYSTEM SHALL fail all four policies and the fallback policy.",
-      "WHEN `LicensingAdmin/Program.cs` is inspected THE SYSTEM SHALL place `app.UseAuthentication()` after `app.UseRouting()` and before `app.MapBlazorHub()`, SHALL set an authorization `FallbackPolicy` that requires an authenticated user, and SHALL configure `PasswordHasherOptions.IterationCount` to at least 210000 (OWASP 2024 for PBKDF2-HMAC-SHA512).",
+      "WHEN `LicensingAdmin/Program.cs` is inspected THE SYSTEM SHALL: place `app.UseAuthentication()` after `app.UseRouting()` and before `app.MapBlazorHub()`; set an authorization `FallbackPolicy` requiring an authenticated user; configure `PasswordHasherOptions.IterationCount` >= 210000; set `Cookie.SecurePolicy = builder.Environment.IsDevelopment() ? SameAsRequest : Always`; set `Cookie.SameSite = Lax` explicitly; set `AccessDeniedPath = \"/Account/AccessDenied\"` (not `/Account/Login`); and call `app.UseHttpsRedirection()` in the non-Development branch.",
+      "WHEN an authenticated user hits `<NotAuthorized>` (insufficient role) THE SYSTEM SHALL show an 'acceso denegado' message rather than redirecting to `/Account/Login` (which loops); WHEN an anonymous user hits it THE SYSTEM SHALL redirect to `/Account/Login?returnUrl=`; and `Pages/Error.cshtml` SHALL carry `@attribute [AllowAnonymous]` so the `FallbackPolicy` does not break the error page.",
       "WHEN `dotnet build LicensingSystem.sln` runs THE SYSTEM SHALL exit 0 and `dotnet test --filter AuthPolicies` SHALL report all tests passed, 0 failed."
     ],
     "verify": [
       "dotnet build LicensingSystem.sln",
       "dotnet test --filter AuthPolicies",
-      "awk '/app\\.UseRouting\\(\\)/{r=NR} /app\\.UseAuthentication\\(\\)/{a=NR} /app\\.MapBlazorHub\\(\\)/{h=NR} END{exit !(r>0 && a>0 && h>0 && r<a && a<h)}' LicensingAdmin/Program.cs"
+      "awk '/app\\.UseRouting\\(\\)/{r=NR} /app\\.UseAuthentication\\(\\)/{a=NR} /app\\.MapBlazorHub\\(\\)/{h=NR} END{exit !(r>0 && a>0 && h>0 && r<a && a<h)}' LicensingAdmin/Program.cs",
+      "grep -q 'AllowAnonymous' LicensingAdmin/Pages/Error.cshtml"
     ],
     "checkpoint": "step-08-cookie-auth",
     "files": [
@@ -205,7 +206,8 @@
       "LicensingSystem.Tests/AuthPoliciesTests.cs",
       "LicensingAdmin/Program.cs",
       "LicensingAdmin/App.razor",
-      "LicensingAdmin/_Imports.razor"
+      "LicensingAdmin/_Imports.razor",
+      "LicensingAdmin/Pages/Error.cshtml"
     ],
     "status": "pending"
   },
@@ -216,9 +218,9 @@
     "dependencies": ["E1-T8"],
     "priority": "p0",
     "acceptance": [
-      "WHEN `AdminCredentialService.BuildPrincipal(adminUser)` runs THE SYSTEM SHALL return a `ClaimsPrincipal` carrying `ClaimTypes.Name` = the user's email and `ClaimTypes.Role` = the `AdminRole` name.",
-      "WHEN `ValidateAsync(email, password)` is given an email that matches no `admin_users` row THE SYSTEM SHALL return null.",
-      "WHEN `ValidateAsync` matches a row whose `IsActive` is false THE SYSTEM SHALL return null even if the password is correct.",
+      "WHEN `AdminCredentialService.BuildPrincipal(adminUser)` runs THE SYSTEM SHALL return a `ClaimsPrincipal` carrying `ClaimTypes.Name` = the user's email and `ClaimTypes.Role` (the default role claim type, so `RequireRole` matches) = the `AdminRole` name.",
+      "WHEN `ValidateAsync(email, password)` is given an email that matches no `admin_users` row THE SYSTEM SHALL return null (and SHALL run a fixed-cost dummy `PasswordHasherService.Verify` first so the no-user path is not distinguishable by timing).",
+      "WHEN `ValidateAsync` matches a row whose `IsActive` is false THE SYSTEM SHALL return null even if the password is correct; and the cookie's `OnValidatePrincipal` SHALL reject a principal whose `AdminUser` no longer exists, is inactive, or changed role, with `Program.cs` setting a bounded `ExpireTimeSpan` (e.g. 8h) alongside the existing `SlidingExpiration`.",
       "WHEN `ValidateAsync` matches an active row and the password verifies THE SYSTEM SHALL return a non-null principal built by `BuildPrincipal`.",
       "WHEN `dotnet build LicensingSystem.sln` runs THE SYSTEM SHALL exit 0.",
       "WHEN `dotnet test --filter AdminCredential` runs THE SYSTEM SHALL report all `AdminCredential` tests passed, 0 failed."
@@ -243,17 +245,18 @@
     "dependencies": ["E2-T1"],
     "priority": "p0",
     "acceptance": [
-      "WHEN `GET /Account/Login` is requested with no authentication cookie THE SYSTEM SHALL return HTTP 200.",
+      "WHEN `GET /Account/Login` is requested with no authentication cookie THE SYSTEM SHALL return HTTP 200; `Pages/Account/AccessDenied.cshtml` exists, carries `@attribute [AllowAnonymous]`, and returns a 'sin permiso' page (the cookie `AccessDeniedPath` from step 8 points here).",
       "WHEN `GET /` is requested with no authentication cookie THE SYSTEM SHALL return HTTP 302 whose `Location` header starts with `/Account/Login`.",
       "WHEN `GET /pending-review` is requested with no authentication cookie THE SYSTEM SHALL return HTTP 302 whose `Location` header starts with `/Account/Login`.",
-      "WHEN `LicensingAdmin/Pages/Account/Login.cshtml.cs` is inspected THE SYSTEM SHALL carry `[AllowAnonymous]` and, on any null `ValidateAsync` result, re-render the page with a single generic error message that does not distinguish the failure cause.",
+      "WHEN `LicensingAdmin/Pages/Account/Login.cshtml.cs` is inspected THE SYSTEM SHALL carry `[AllowAnonymous]`, on any null `ValidateAsync` result re-render with a single generic error message that does not distinguish the failure cause, and validate `returnUrl` with `Url.IsLocalUrl` (rejecting absolute and `//host` URLs, falling back to `/`).",
       "WHEN a POST to `/Account/Login` succeeds THE SYSTEM SHALL call `HttpContext.SignInAsync`, set `AdminUser.LastLoginAtUtc`, and write an `AuditLogEntry` with `Action` = \"Login\".",
       "WHEN `dotnet build LicensingSystem.sln` runs THE SYSTEM SHALL exit 0 and `dotnet test --filter AuthorizationPipeline` SHALL report all tests passed, 0 failed."
     ],
     "verify": [
       "dotnet build LicensingSystem.sln",
       "dotnet test --filter AuthorizationPipeline",
-      "grep -q \"\\[AllowAnonymous\\]\" LicensingAdmin/Pages/Account/Login.cshtml.cs"
+      "grep -q \"\\[AllowAnonymous\\]\" LicensingAdmin/Pages/Account/Login.cshtml.cs",
+      "grep -q \"\\[AllowAnonymous\\]\" LicensingAdmin/Pages/Account/AccessDenied.cshtml"
     ],
     "checkpoint": "step-10-login-pages",
     "files": [
@@ -261,6 +264,7 @@
       "LicensingAdmin/Pages/Account/Login.cshtml",
       "LicensingAdmin/Pages/Account/Login.cshtml.cs",
       "LicensingAdmin/Pages/Account/Logout.cshtml.cs",
+      "LicensingAdmin/Pages/Account/AccessDenied.cshtml",
       "LicensingAdmin/Program.cs"
     ],
     "status": "pending"

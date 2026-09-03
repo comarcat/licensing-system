@@ -172,25 +172,28 @@ abajo y no re-ordenes por prioridad ni por lo que parezca rápido.
 
 `AdminCredentialService` con costura `IAdminUserLookup` (`Task<AdminUser?> FindByEmailAsync(string)`;
 impl real usa `IDbContextFactory<AppDbContext>` + `db.AdminUsers`, case-insensitive).
-`ValidateAsync`: sin fila → `null`; `Verify` falla → `null`; `!IsActive` → `null`; OK →
-`BuildPrincipal`. `static ClaimsPrincipal BuildPrincipal(AdminUser)` puro: `ClaimTypes.Name`=email,
-`ClaimTypes.Role`=`u.Role.ToString()`. `AdminAuthStateProvider`:
+`ValidateAsync`: sin fila → **`Verify` dummy de coste fijo** + `null` (anti-timing, B-1 de E1-T7);
+`Verify` real falla → `null`; `!IsActive` → `null`; OK → `BuildPrincipal`. `static ClaimsPrincipal
+BuildPrincipal(AdminUser)` puro: `ClaimTypes.Name`=email, **`ClaimTypes.Role`** (role claim type por
+defecto) = `u.Role.ToString()`. `AdminAuthStateProvider`:
 `RevalidatingServerAuthenticationStateProvider`, 30 min, revalida recargando el `AdminUser` y
-comprobando `IsActive`. Registra `AdminCredentialService`, `IAdminUserLookup` y
-`AdminAuthStateProvider` (como `AuthenticationStateProvider`, `AddScoped`) en `Program.cs`. El test
-usa un fake `IAdminUserLookup` — sin `DbContext`.
+comprobando `IsActive` + rol sin cambio. En `Program.cs`, además de registrar los tres servicios
+(`AddScoped`): en el `AddCookie` del paso 8 añade `o.ExpireTimeSpan = TimeSpan.FromHours(8)` y
+`o.Events.OnValidatePrincipal` que recarga el `AdminUser` (existe + `IsActive` + rol) y
+`context.RejectPrincipal()` si falla — un admin desactivado pierde la sesión sin esperar a Blazor.
+El test usa un fake `IAdminUserLookup` — sin `DbContext`.
 
 **Files**
 - `LicensingAdmin/Auth/AdminAuthStateProvider.cs` — nuevo
 - `LicensingAdmin/Auth/AdminCredentialService.cs` — nuevo (incluye `IAdminUserLookup` y su impl EF)
 - `LicensingSystem.Tests/AdminCredentialServiceTests.cs` — nuevo: clase `AdminCredentialServiceTests`
-- `LicensingAdmin/Program.cs` — edit: registra los tres servicios
+- `LicensingAdmin/Program.cs` — edit: registra los tres servicios + `ExpireTimeSpan` + `OnValidatePrincipal`
 
 **Acceptance**
 
-1. **WHEN** `AdminCredentialService.BuildPrincipal(adminUser)` runs **THE SYSTEM SHALL** return a `ClaimsPrincipal` carrying `ClaimTypes.Name` = the user's email and `ClaimTypes.Role` = the `AdminRole` name.
-2. **WHEN** `ValidateAsync(email, password)` is given an email that matches no `admin_users` row **THE SYSTEM SHALL** return null.
-3. **WHEN** `ValidateAsync` matches a row whose `IsActive` is false **THE SYSTEM SHALL** return null even if the password is correct.
+1. **WHEN** `AdminCredentialService.BuildPrincipal(adminUser)` runs **THE SYSTEM SHALL** return a `ClaimsPrincipal` carrying `ClaimTypes.Name` = the user's email and `ClaimTypes.Role` (the default role claim type, so `RequireRole` matches) = the `AdminRole` name.
+2. **WHEN** `ValidateAsync(email, password)` is given an email that matches no `admin_users` row **THE SYSTEM SHALL** return null (and SHALL run a fixed-cost dummy `PasswordHasherService.Verify` first so the no-user path is not distinguishable by timing).
+3. **WHEN** `ValidateAsync` matches a row whose `IsActive` is false **THE SYSTEM SHALL** return null even if the password is correct; and the cookie's `OnValidatePrincipal` SHALL reject a principal whose `AdminUser` no longer exists, is inactive, or changed role, with `Program.cs` setting a bounded `ExpireTimeSpan` (e.g. 8h) alongside the existing `SlidingExpiration`.
 4. **WHEN** `ValidateAsync` matches an active row and the password verifies **THE SYSTEM SHALL** return a non-null principal built by `BuildPrincipal`.
 5. **WHEN** `dotnet build LicensingSystem.sln` runs **THE SYSTEM SHALL** exit 0.
 6. **WHEN** `dotnet test --filter AdminCredential` runs **THE SYSTEM SHALL** report all `AdminCredential` tests passed, 0 failed.
@@ -216,10 +219,15 @@ git tag step-09-auth-state
 `Login.cshtml(.cs)` `[AllowAnonymous]`: GET renderiza el formulario (email, contraseña, `returnUrl`);
 POST → `AdminCredentialService.ValidateAsync` → si principal: `HttpContext.SignInAsync`, fija
 `AdminUser.LastLoginAtUtc`, escribe `AuditLogEntry` (`Actor`=email, `EntityType`="AdminUser",
-`Action`="Login"), redirige a `returnUrl` o `/`; si `null`: re-renderiza con **un** mensaje de error
-genérico (sin distinguir causa). `Logout.cshtml.cs`: `SignOutAsync` → `/Account/Login`. Añade
-`public partial class Program { }` al final de `LicensingAdmin/Program.cs` para que el proyecto de
-tests referencie `WebApplicationFactory<Program>` (sin `InternalsVisibleTo`). `AuthorizationPipelineTests`:
+`Action`="Login"), redirige a `returnUrl` **validado con `Url.IsLocalUrl`** (rechaza absolutos y
+`//host`; cae a `/`); si `null`: re-renderiza con **un** mensaje de error genérico (sin distinguir
+causa). **Recomendado (no bloqueante):** lockout por email en memoria (5 fallos / 15 min); el
+rate-limiting de middleware sigue siendo Non-Goal. `Logout.cshtml.cs`: `SignOutAsync` →
+`/Account/Login`. `AccessDenied.cshtml` (`@page "/Account/AccessDenied"`, `@attribute
+[AllowAnonymous]`): página mínima "no tienes permiso" (200, sin rebote) — destino del
+`AccessDeniedPath` de la cookie (paso 8). Añade `public partial class Program { }` al final de
+`LicensingAdmin/Program.cs` para `WebApplicationFactory<Program>` (sin `InternalsVisibleTo`).
+`AuthorizationPipelineTests`:
 una `WebApplicationFactory<Program>` que en `ConfigureAppConfiguration` fija
 `ConnectionStrings:LicensingDb = "Host=localhost;Port=5432;Database=test;Username=test;Password=test"`
 (nunca se conecta: una petición anónima recibe 302 antes de tocar la BD). En este paso `Program.cs`
@@ -228,19 +236,20 @@ añade `AddHostedService<AdminSeeder>()`— extiende este archivo para quitar es
 `GET /Account/Login` anónimo → 200; `GET /` y `GET /pending-review` anónimos → 302 con `Location`
 que empieza por `/Account/Login`.
 
-**Files**
+**Files** (6 — páginas de cuenta + wiring; el tope de 5 se exime, igual que E1-T1/E1-T8)
 - `LicensingSystem.Tests/AuthorizationPipelineTests.cs` — nuevo: clase `AuthorizationPipelineTests`
 - `LicensingAdmin/Pages/Account/Login.cshtml` — nuevo: markup del formulario
-- `LicensingAdmin/Pages/Account/Login.cshtml.cs` — nuevo: `[AllowAnonymous]`, GET/POST
+- `LicensingAdmin/Pages/Account/Login.cshtml.cs` — nuevo: `[AllowAnonymous]`, GET/POST, `Url.IsLocalUrl`
 - `LicensingAdmin/Pages/Account/Logout.cshtml.cs` — nuevo
+- `LicensingAdmin/Pages/Account/AccessDenied.cshtml` — nuevo: `[AllowAnonymous]`, "sin permiso" (200)
 - `LicensingAdmin/Program.cs` — edit: `public partial class Program { }`
 
 **Acceptance**
 
-1. **WHEN** `GET /Account/Login` is requested with no authentication cookie **THE SYSTEM SHALL** return HTTP 200.
+1. **WHEN** `GET /Account/Login` is requested with no authentication cookie **THE SYSTEM SHALL** return HTTP 200; `Pages/Account/AccessDenied.cshtml` exists, carries `@attribute [AllowAnonymous]`, and returns a 'sin permiso' page (the cookie `AccessDeniedPath` from step 8 points here).
 2. **WHEN** `GET /` is requested with no authentication cookie **THE SYSTEM SHALL** return HTTP 302 whose `Location` header starts with `/Account/Login`.
 3. **WHEN** `GET /pending-review` is requested with no authentication cookie **THE SYSTEM SHALL** return HTTP 302 whose `Location` header starts with `/Account/Login`.
-4. **WHEN** `LicensingAdmin/Pages/Account/Login.cshtml.cs` is inspected **THE SYSTEM SHALL** carry `[AllowAnonymous]` and, on any null `ValidateAsync` result, re-render the page with a single generic error message that does not distinguish the failure cause.
+4. **WHEN** `LicensingAdmin/Pages/Account/Login.cshtml.cs` is inspected **THE SYSTEM SHALL** carry `[AllowAnonymous]`, on any null `ValidateAsync` result re-render with a single generic error message that does not distinguish the failure cause, and validate `returnUrl` with `Url.IsLocalUrl` (rejecting absolute and `//host` URLs, falling back to `/`).
 5. **WHEN** a POST to `/Account/Login` succeeds **THE SYSTEM SHALL** call `HttpContext.SignInAsync`, set `AdminUser.LastLoginAtUtc`, and write an `AuditLogEntry` with `Action` = "Login".
 6. **WHEN** `dotnet build LicensingSystem.sln` runs **THE SYSTEM SHALL** exit 0 and `dotnet test --filter AuthorizationPipeline` **SHALL** report all tests passed, 0 failed.
 
@@ -250,6 +259,7 @@ que empieza por `/Account/Login`.
 dotnet build LicensingSystem.sln
 dotnet test --filter AuthorizationPipeline
 grep -q "\[AllowAnonymous\]" LicensingAdmin/Pages/Account/Login.cshtml.cs
+grep -q "\[AllowAnonymous\]" LicensingAdmin/Pages/Account/AccessDenied.cshtml
 ```
 
 **Checkpoint**

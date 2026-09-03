@@ -365,26 +365,34 @@ git tag step-05-license-signer
 
 **Depends on:** E1-T5 · **Priority:** p0
 
-`CryptoRegistration.AddLicenseSigner(this IServiceCollection, IConfiguration)`: lee
-`config["Crypto:RsaPrivateKeyPem"]`; si no vacío → `RSA.Create()` + `ImportFromPem`; si vacío →
-`RSA.Create(2048)` + warning por `ILogger` (dev-only). Registra `ILicenseSigner` singleton. Llámalo
-una vez en `Program.cs`. Extrae el registro a `CryptoRegistration.cs` justamente para poder testearlo.
-La clase de test es `CryptoRegistrationTests` con **nombres de método normales** — **no** el prefijo
-`LicenseSignerDi_` (colisiona con `--filter LicenseSigner` del paso 5 por ser substring de FQN). La
-puerta es `--filter CryptoRegistration`.
+`CryptoRegistration.AddLicenseSigner(this IServiceCollection, IConfiguration, IHostEnvironment env)`.
+**Valida la clave EAGER** (en la llamada, antes de `builder.Build()`):
+- PEM no vacío → `RSA.Create()` + `ImportFromPem`; comprueba material privado
+  (`ExportParameters(true)` no lanza) y `KeySize >= 2048`; cualquier fallo (malformado, solo-público,
+  clave corta) → `InvalidOperationException` que **nombra `Crypto:RsaPrivateKeyPem`** y **nunca**
+  vuelca el valor.
+- PEM vacío **y** `env.IsDevelopment()` → `RSA.Create(2048)` fallback + **un** warning (dev-only).
+- PEM vacío **y** NO `IsDevelopment()` → `InvalidOperationException` (fail-closed, igual que
+  `ConnectionStringGuard`).
+
+Registra `ILicenseSigner` singleton con la `RSA` ya validada. Warning con categoría tipada
+(`ILogger<CryptoRegistration>`), no string literal. Llámalo una vez en `Program.cs` con
+`(builder.Configuration, builder.Environment)`. Clase de test `CryptoRegistrationTests`, nombres de
+método **sin** el prefijo `LicenseSignerDi_` (colisiona con `--filter LicenseSigner` del paso 5).
+Puerta `--filter CryptoRegistration`.
 
 **Files**
-- `LicensingAdmin/Program.cs` — edit: `builder.Services.AddLicenseSigner(builder.Configuration)`
+- `LicensingAdmin/Program.cs` — edit: `AddLicenseSigner(builder.Configuration, builder.Environment)`
 - `LicensingAdmin/Auth/CryptoRegistration.cs` — nuevo
 - `LicensingSystem.Tests/CryptoRegistrationTests.cs` — nuevo: clase `CryptoRegistrationTests`
 
 **Acceptance**
 
-1. **WHEN** `AddLicenseSigner(services, config)` runs with `Crypto:RsaPrivateKeyPem` set to a valid PEM **THE SYSTEM SHALL** register `ILicenseSigner` such that `GetRequiredService<ILicenseSigner>()` resolves without throwing.
-2. **WHEN** `AddLicenseSigner(services, config)` runs with no `Crypto:RsaPrivateKeyPem` configured **THE SYSTEM SHALL** still resolve `ILicenseSigner` using an in-memory RSA key and **SHALL** log one warning.
-3. **WHEN** `dotnet build LicensingSystem.sln` runs **THE SYSTEM SHALL** exit 0.
-4. **WHEN** `LicensingAdmin/Program.cs` is inspected **THE SYSTEM SHALL** call `AddLicenseSigner(...)` exactly once.
-5. **WHEN** `dotnet test --filter CryptoRegistration` runs **THE SYSTEM SHALL** report all `CryptoRegistrationTests` tests passed, 0 failed (the filter token contains no substring that also selects `LicenseSignerTests`).
+1. **WHEN** `AddLicenseSigner(services, config, env)` runs with `Crypto:RsaPrivateKeyPem` set to a valid RSA private-key PEM **THE SYSTEM SHALL** register `ILicenseSigner` such that `GetRequiredService<ILicenseSigner>()` resolves without throwing.
+2. **WHEN** `AddLicenseSigner(services, config, env)` runs with `Crypto:RsaPrivateKeyPem` blank AND `env.IsDevelopment()` **THE SYSTEM SHALL** resolve `ILicenseSigner` with an in-memory RSA key and SHALL log exactly one warning; **WHEN** blank AND NOT `IsDevelopment()` **THE SYSTEM SHALL** throw `InvalidOperationException` at registration time (before `builder.Build()`) whose message names `Crypto:RsaPrivateKeyPem` and never contains key material.
+3. **WHEN** `Crypto:RsaPrivateKeyPem` is set but is malformed, a public-key-only PEM, or an RSA key shorter than 2048 bits **THE SYSTEM SHALL** throw `InvalidOperationException` at registration time naming `Crypto:RsaPrivateKeyPem` (never dumping the value), not fail lazily on the first `Sign`.
+4. **WHEN** `LicensingAdmin/Program.cs` is inspected **THE SYSTEM SHALL** call `AddLicenseSigner(builder.Configuration, builder.Environment)` exactly once, and the fallback warning SHALL use a typed logger category (`ILogger<CryptoRegistration>` / `typeof(CryptoRegistration).FullName`), not a string literal.
+5. **WHEN** `dotnet build LicensingSystem.sln` runs **THE SYSTEM SHALL** exit 0 and `dotnet test --filter CryptoRegistration` SHALL report all `CryptoRegistrationTests` passed, 0 failed (the filter token selects no `LicenseSignerTests`).
 
 **Verify**
 
@@ -448,33 +456,39 @@ git tag step-07-password-hasher
 `RequireAuthenticatedUser()`; `ReviewAccess` e `IssueAccess` = `RequireRole(nameof(AdminRole.SupportStaff),
 nameof(AdminRole.SuperAdmin))`; `AdminUserAccess` = `RequireRole(nameof(AdminRole.SuperAdmin))`;
 además `options.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build()`
-(toda ruta exige sesión salvo `[AllowAnonymous]`). En `Program.cs`: `AddAuthentication(Cookie...).
-AddCookie(o => { LoginPath = "/Account/Login"; AccessDeniedPath = "/Account/Login"; Cookie.HttpOnly =
-true; Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest; SlidingExpiration = true; })`;
-`AddAdminAuthorization()`; `services.Configure<PasswordHasherOptions>(o => o.IterationCount =
-210_000)` (OWASP 2024 para PBKDF2-HMAC-SHA512; el `PasswordHasherService` del paso 7 lo recibe por
-DI); `app.UseAuthentication(); app.UseAuthorization();` **entre** `UseRouting` y
-`MapBlazorHub`. `App.razor` → `CascadingAuthenticationState` + `AuthorizeRouteView` con
-`<NotAuthorized>` que renderiza un componente `RedirectToLogin` (navega a `/Account/Login?returnUrl=`;
-durante SSR produce el 302). `_Imports.razor` → los dos `@using` de autorización. El test construye
-un `ServiceProvider` con `AddAdminAuthorization()` y evalúa la matriz rol→política + la
-`FallbackPolicy` con `IAuthorizationService`.
+(toda ruta exige sesión salvo `[AllowAnonymous]`). En `Program.cs`, `AddCookie(o => { LoginPath =
+"/Account/Login"; AccessDeniedPath = "/Account/AccessDenied"; Cookie.HttpOnly = true; Cookie.SameSite
+= SameSiteMode.Lax; Cookie.SecurePolicy = builder.Environment.IsDevelopment() ? SameAsRequest :
+Always; SlidingExpiration = true; })`; en la rama `if (!app.Environment.IsDevelopment())` (con
+`UseHsts()`): `app.UseHttpsRedirection()`; `AddAdminAuthorization()`;
+`services.Configure<PasswordHasherOptions>(o => o.IterationCount = 210_000)` (OWASP 2024; el
+`PasswordHasherService` del paso 7 lo recibe por DI); `app.UseAuthentication(); app.UseAuthorization();`
+**entre** `UseRouting` y `MapBlazorHub`. `App.razor` → `CascadingAuthenticationState` +
+`AuthorizeRouteView Context="ctx"` con `<NotAuthorized>` que, **si `ctx.User.Identity?.IsAuthenticated`**,
+muestra "no tienes permiso" dentro del `MainLayout` (sin redirigir → sin bucle); **si anónimo**,
+`RedirectToLogin()` (`NavigateTo("/Account/Login?returnUrl=...", forceLoad: true)`). `_Imports.razor`
+→ los dos `@using` de autorización. `Pages/Error.cshtml` → `@attribute [AllowAnonymous]` (la
+`FallbackPolicy` si no rompe la página de error de una request anónima). El test evalúa la matriz
+rol→política + la `FallbackPolicy` con `IAuthorizationService`.
 
 **Files**
 - `LicensingAdmin/Auth/AuthPolicies.cs` — nuevo
 - `LicensingSystem.Tests/AuthPoliciesTests.cs` — nuevo: clase `AuthPoliciesTests`
-- `LicensingAdmin/Program.cs` — edit: cookie auth + políticas + `FallbackPolicy` + orden de middleware
-- `LicensingAdmin/App.razor` — edit: `CascadingAuthenticationState` + `AuthorizeRouteView` + `RedirectToLogin`
+- `LicensingAdmin/Program.cs` — edit: cookie auth + políticas + `FallbackPolicy` + cookie hardening + `UseHttpsRedirection`
+- `LicensingAdmin/App.razor` — edit: `CascadingAuthenticationState` + `AuthorizeRouteView` + `<NotAuthorized>` (auth→mensaje / anon→redirect)
 - `LicensingAdmin/_Imports.razor` — edit: `@using Microsoft.AspNetCore.Authorization` / `.Components.Authorization`
+- `LicensingAdmin/Pages/Error.cshtml` — edit: `@attribute [AllowAnonymous]`
+
+(6 archivos — tarea de cierre de épica y de cableado; el tope de 5 se exime, igual que E1-T1.)
 
 **Acceptance**
 
 1. **WHEN** `AuthPolicies` is inspected **THE SYSTEM SHALL** expose `ViewerAccess`, `ReviewAccess`, `IssueAccess`, `AdminUserAccess` as string constants.
-2. **WHEN** a `ClaimsPrincipal` in role `ReadOnlyViewer` is checked **THE SYSTEM SHALL** satisfy `ViewerAccess` and fail `ReviewAccess`, `IssueAccess`, `AdminUserAccess`.
-3. **WHEN** a `ClaimsPrincipal` in role `SupportStaff` is checked **THE SYSTEM SHALL** satisfy `ViewerAccess`, `ReviewAccess`, `IssueAccess` and fail `AdminUserAccess`.
-4. **WHEN** a `ClaimsPrincipal` in role `SuperAdmin` is checked **THE SYSTEM SHALL** satisfy all four policies, and **WHEN** an unauthenticated `ClaimsPrincipal` is checked **THE SYSTEM SHALL** fail all four policies and the fallback policy.
-5. **WHEN** `LicensingAdmin/Program.cs` is inspected **THE SYSTEM SHALL** place `app.UseAuthentication()` after `app.UseRouting()` and before `app.MapBlazorHub()`, **SHALL** set an authorization `FallbackPolicy` that requires an authenticated user, and **SHALL** configure `PasswordHasherOptions.IterationCount` to at least 210000 (OWASP 2024 for PBKDF2-HMAC-SHA512).
-6. **WHEN** `dotnet build LicensingSystem.sln` runs **THE SYSTEM SHALL** exit 0 and `dotnet test --filter AuthPolicies` **SHALL** report all tests passed, 0 failed.
+2. **WHEN** a `ClaimsPrincipal` in role `ReadOnlyViewer` is checked **THE SYSTEM SHALL** satisfy only `ViewerAccess`; in role `SupportStaff` **THE SYSTEM SHALL** satisfy `ViewerAccess`, `ReviewAccess`, `IssueAccess` and fail `AdminUserAccess`.
+3. **WHEN** a `ClaimsPrincipal` in role `SuperAdmin` is checked **THE SYSTEM SHALL** satisfy all four policies, and **WHEN** an unauthenticated `ClaimsPrincipal` is checked **THE SYSTEM SHALL** fail all four policies and the fallback policy.
+4. **WHEN** `LicensingAdmin/Program.cs` is inspected THE SYSTEM SHALL: place `app.UseAuthentication()` after `app.UseRouting()` and before `app.MapBlazorHub()`; set an authorization `FallbackPolicy` requiring an authenticated user; configure `PasswordHasherOptions.IterationCount` >= 210000; set `Cookie.SecurePolicy = builder.Environment.IsDevelopment() ? SameAsRequest : Always`; set `Cookie.SameSite = Lax` explicitly; set `AccessDeniedPath = "/Account/AccessDenied"` (not `/Account/Login`); and call `app.UseHttpsRedirection()` in the non-Development branch.
+5. **WHEN** an authenticated user hits `<NotAuthorized>` (insufficient role) **THE SYSTEM SHALL** show an 'acceso denegado' message rather than redirecting to `/Account/Login` (which loops); **WHEN** an anonymous user hits it **THE SYSTEM SHALL** redirect to `/Account/Login?returnUrl=`; and `Pages/Error.cshtml` SHALL carry `@attribute [AllowAnonymous]` so the `FallbackPolicy` does not break the error page.
+6. **WHEN** `dotnet build LicensingSystem.sln` runs **THE SYSTEM SHALL** exit 0 and `dotnet test --filter AuthPolicies` SHALL report all tests passed, 0 failed.
 
 **Verify**
 
@@ -482,6 +496,7 @@ un `ServiceProvider` con `AddAdminAuthorization()` y evalúa la matriz rol→pol
 dotnet build LicensingSystem.sln
 dotnet test --filter AuthPolicies
 awk '/app\.UseRouting\(\)/{r=NR} /app\.UseAuthentication\(\)/{a=NR} /app\.MapBlazorHub\(\)/{h=NR} END{exit !(r>0 && a>0 && h>0 && r<a && a<h)}' LicensingAdmin/Program.cs
+grep -q 'AllowAnonymous' LicensingAdmin/Pages/Error.cshtml
 ```
 
 **Checkpoint**
