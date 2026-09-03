@@ -78,7 +78,7 @@ un defecto del blueprint: parar y reportar, no ampliar el alcance.
 
 | Métrica | Objetivo | Cómo se mide |
 |---|---|---|
-| Credenciales en texto plano en archivos rastreados del repo | 0 | `git grep -n "Password=***REDACTED***" -- ':!docs/blueprint'` → exit 1 (§20.1) |
+| Credenciales en texto plano en archivos rastreados del repo | 0 | `git grep -n "Password=***REDACTED***" -- ':!docs/blueprint' ':!tasks.json'` → exit 1 (§20.1) |
 | Acciones admin que mutan datos sin `AuditLogEntry` | 0 | Revisión de código + tests de `LicenseIssuanceService` / `AdminUserService` / login |
 | Aprobaciones/rechazos con revisor `"support-staff@vendor.com"` | 0 tras el slice | `grep -RIl "support-staff@vendor.com" LicensingAdmin/` → exit 1 (§20.1) |
 | Rutas protegidas que sirven contenido a una petición anónima | 0 | `AuthorizationPipelineTests` (paso 10) — GET anónimo a `/` y `/pending-review` → 302 |
@@ -684,8 +684,15 @@ visibles para cualquier administrador autenticado según su rol.
    asserta en el bloque `Checkpoint` del paso 16, después de su propio `git tag`, y también en la
    puerta manual de §20.1.
 6. **Cada paso `dotnet test --filter <Nombre>` nombra en su Do la clase de test** y métodos cuyo
-   nombre contiene `<Nombre>`, de modo que el filtro selecciona ≥1 test. Backstop:
-   `<VSTestTreatNoTestsAsError>true</VSTestTreatNoTestsAsError>` (paso 1) y los pasos 14 y 16 corren
+   nombre contiene `<Nombre>`, de modo que el filtro selecciona ≥1 test. El `--filter` de VSTest es
+   **substring sobre el FQN** (namespace + clase + método), no nombre exacto, así que los tokens de
+   filtro se eligen sin prefijo colisionante entre tareas (p. ej. `CryptoRegistration` para el paso
+   6, no `LicenseSignerDi`, para no seleccionar también `LicenseSignerTests` del paso 5). Backstop
+   contra el falso-verde de un `--filter` con typo: `LicensingSystem.Tests/.runsettings` con
+   `<RunConfiguration><TreatNoTestsAsError>true</TreatNoTestsAsError></RunConfiguration>`, referenciado
+   por `<RunSettingsFilePath>` en el `.csproj` (paso 1). **La propiedad MSBuild
+   `<VSTestTreatNoTestsAsError>` no existe — es inerte;** el mecanismo real es el `.runsettings` o
+   `dotnet test -- RunConfiguration.TreatNoTestsAsError=true`. Además los pasos 14 y 16 corren
    `dotnet test` sin filtro sobre toda la suite.
 7. **Ningún paso introduce una regla que retroactivamente rompa la puerta de un paso anterior.** La
    `FallbackPolicy` del paso 8 y el guardián del paso 2 nunca se ejecutan bajo `dotnet build`; solo
@@ -727,15 +734,25 @@ código de producto: corre la puerta completa y cuenta los tags.
 ### Step 1 — Scaffold `LicensingSystem.Tests` y wiring en la solución
 
 **Do**
-Crear el proyecto de tests y engancharlo a la solución. Crear:
+Tarea de andamiaje: 7 archivos de proyecto/config, **cero lógica** — el tope de "≤5 archivos" no
+aplica (aprobado por el Arquitecto en la enmienda de 2026-09-02). Crear:
 - `LicensingSystem.Tests/LicensingSystem.Tests.csproj` — `Microsoft.NET.Sdk`, `net8.0`,
   `<Nullable>enable</Nullable>`, `<IsPackable>false</IsPackable>`, `<OutputType>Exe</OutputType>`
-  (xUnit v3 corre como ejecutable), `<VSTestTreatNoTestsAsError>true</VSTestTreatNoTestsAsError>`
-  (un `--filter` que no selecciona nada debe fallar, no pasar en vacío),
+  (xUnit v3 corre como ejecutable),
+  `<RunSettingsFilePath>$(MSBuildThisFileDirectory).runsettings</RunSettingsFilePath>`,
   `<FrameworkReference Include="Microsoft.AspNetCore.App" />` (los tests usan `PasswordHasher<T>`,
   autorización, `ClaimsPrincipal` y `WebApplicationFactory<Program>` directamente). Los 5
   `PackageReference` de §11. `ProjectReference` a `..\LicensingCore\LicensingCore.csproj` y
-  `..\LicensingAdmin\LicensingAdmin.csproj`.
+  `..\LicensingAdmin\LicensingAdmin.csproj`. **No** uses `<VSTestTreatNoTestsAsError>` — esa
+  propiedad MSBuild no existe (inerte); ver el `.runsettings`.
+- `LicensingSystem.Tests/.runsettings` — `<RunSettings><RunConfiguration><TreatNoTestsAsError>true</TreatNoTestsAsError></RunConfiguration></RunSettings>`.
+  Sin esto, `dotnet test --filter <clase-inexistente>` sale **exit 0 con 0 tests** (falso verde), y
+  todas las puertas `--filter` de los pasos 2–16 serían inseguras ante un typo o un test no cableado.
+- `global.json` en la **raíz** del repo — `{ "sdk": { "version": "8.0.400", "rollForward": "latestFeature" } }`
+  (ajusta el patch a un `8.0.4xx` presente en el nodo `dev`; `latestFeature` permite bumps de patch).
+  El nodo `dev` tiene SDK 8.0.4xx **y** 10.0.4xx; sin `global.json`, `dotnet` elegiría el 10.x y
+  compilaría `net8.0` con analizadores de otra major → riesgo en `dotnet build -warnaserror` del
+  paso 16. Ver §20.3 #8.
 - `LicensingSystem.Tests/SmokeTests.cs` — una sola prueba `[Fact] public void Smoke() =>
   Assert.True(true);`.
 - `dotnet sln LicensingSystem.sln add LicensingSystem.Tests/LicensingSystem.Tests.csproj`.
@@ -748,12 +765,17 @@ Versiones: exclusivamente las de §11; no se fija ninguna en este texto.
 - [ ] WHEN `dotnet build LicensingSystem.sln` runs THE SYSTEM SHALL exit 0 with `LicensingSystem.Tests` present as a fourth project in the solution.
 - [ ] WHEN `dotnet test` runs from the repo root THE SYSTEM SHALL report 1 passed, 0 failed, 0 skipped.
 - [ ] WHEN `LicensingApi.csproj` and `LicensingAdmin.csproj` are inspected THE SYSTEM SHALL each contain a non-empty `<UserSecretsId>` element.
-- [ ] WHEN `LicensingSystem.Tests.csproj` is inspected THE SYSTEM SHALL set `<IsPackable>false</IsPackable>` and reference exactly the five pinned test packages (Microsoft.NET.Test.Sdk, xunit.v3, xunit.runner.visualstudio, coverlet.collector, Microsoft.AspNetCore.Mvc.Testing) plus project references to `LicensingCore` and `LicensingAdmin`.
+- [ ] WHEN `LicensingSystem.Tests.csproj` is inspected THE SYSTEM SHALL set `<IsPackable>false</IsPackable>`, reference exactly the five pinned test packages (Microsoft.NET.Test.Sdk, xunit.v3, xunit.runner.visualstudio, coverlet.collector, Microsoft.AspNetCore.Mvc.Testing) plus project references to `LicensingCore` and `LicensingAdmin`, and point `<RunSettingsFilePath>` at a committed `LicensingSystem.Tests/.runsettings`.
+- [ ] WHEN `LicensingSystem.Tests/.runsettings` is inspected THE SYSTEM SHALL set `<TreatNoTestsAsError>true</TreatNoTestsAsError>`.
+- [ ] WHEN `dotnet --version` runs at the repo root THE SYSTEM SHALL report an `8.0.4xx` SDK selected by a committed `global.json` with `rollForward: latestFeature`.
 
 **Verify**
 ```bash
 dotnet build LicensingSystem.sln        # expect: exit 0
 dotnet test                             # expect: exit 0 — 1 passed, 0 failed, 0 skipped
+grep -q 'TreatNoTestsAsError' LicensingSystem.Tests/.runsettings && grep -q 'RunSettingsFilePath' LicensingSystem.Tests/LicensingSystem.Tests.csproj
+# expect: exit 0 — the no-tests-is-error backstop is wired
+dotnet --version | grep -q '^8[.]0[.]'  # expect: exit 0 — global.json pins the 8.0.x SDK
 ```
 
 **Checkpoint**
@@ -807,12 +829,13 @@ git tag step-02-conn-guard
   set`) a un placeholder
   `Host=<host>;Port=5432;Database=licensing_app;Username=<user>;Password=<password>`, y quitar
   cualquier frase tipo "está bien para local". No debe quedar `Password=***REDACTED***` en ningún archivo
-  rastreado fuera de `docs/blueprint/`.
+  rastreado fuera de `docs/blueprint/` **y de `tasks.json`** (que contiene el literal en el texto de
+  sus propios criterios/comandos — auto-referencia inofensiva; el pathspec la excluye).
 
 **Done when**
 - [ ] WHEN `LicensingApi/appsettings.json` and `LicensingAdmin/appsettings.json` are inspected THE SYSTEM SHALL each set `ConnectionStrings:LicensingDb` to the empty string.
 - [ ] WHEN `grep -RIl "Password=" LicensingApi/appsettings.json LicensingAdmin/appsettings.json` runs THE SYSTEM SHALL find no match and exit 1.
-- [ ] WHEN `git grep -n "Password=***REDACTED***" -- ':!docs/blueprint'` runs THE SYSTEM SHALL find no match and exit 1.
+- [ ] WHEN `git grep -n "Password=***REDACTED***" -- ':!docs/blueprint' ':!tasks.json'` runs THE SYSTEM SHALL find no match and exit 1.
 - [ ] WHEN `LicensingSystem_README.md` and `LicensingApi/README.md` are inspected THE SYSTEM SHALL show the connection string only as a placeholder with no real password value.
 - [ ] WHEN `dotnet build LicensingSystem.sln` runs THE SYSTEM SHALL exit 0.
 
@@ -820,8 +843,9 @@ git tag step-02-conn-guard
 ```bash
 grep -RIl "Password=" LicensingApi/appsettings.json LicensingAdmin/appsettings.json; test $? -eq 1
 # expect: exit 0 — grep exits 1 (no plaintext credential in either file); exit 2 (missing file) would fail the gate
-git grep -n "Password=***REDACTED***" -- ':!docs/blueprint'; test $? -eq 1
-# expect: exit 0 — git grep exits 1 (no tracked file outside the bundle carries the credential)
+git grep -n "Password=***REDACTED***" -- ':!docs/blueprint' ':!tasks.json'; test $? -eq 1
+# expect: exit 0 — git grep exits 1. Excludes the bundle (docs/blueprint/) and tasks.json, whose own
+#         criterion/verify text quotes the literal — the pathspec is what keeps the gate from self-matching.
 dotnet build LicensingSystem.sln             # expect: exit 0
 ```
 
@@ -872,22 +896,32 @@ git tag step-04-license-key-generator
 - `LicensingCore/Crypto/ILicenseSigner.cs` — `byte[] Sign(License license)` y
   `bool Verify(License license, byte[] signature, System.Security.Cryptography.RSA publicKey)`.
 - `LicensingCore/Crypto/LicenseSigner.cs` — implementa `ILicenseSigner` según §8 D2: constructor
-  `LicenseSigner(RSA signingKey)`; payload canónico = bytes UTF-8 de
-  `{LicenseKey}|{ProductId:D}|{(int)ModelSnapshot}|{MaxActivations}|{SubscriptionExpiryUtc:O-or-empty-string}`
-  (cadena vacía cuando `SubscriptionExpiryUtc` es `null`; formato `O` en otro caso); firma
-  `RSA-SHA256` con `RSASignaturePadding.Pkcs1`. Expone `public static byte[] CanonicalBytes(License
-  license)` para los tests.
+  `LicenseSigner(RSA signingKey)`; firma `RSA-SHA256` con `RSASignaturePadding.Pkcs1`. Expone
+  `public static byte[] CanonicalBytes(License license)`. **Payload canónico** = bytes UTF-8 (sin
+  BOM) de `licsig-v1|{LicenseKey}|{ProductId:D}|{(int)ModelSnapshot}|{MaxActivations}|{expiry}` con
+  `FormattableString.Invariant`, donde:
+  - prefijo fijo `licsig-v1|` — separación de dominio: la misma clave RSA no debe poder confundir una
+    firma de `LicenseSigner` con una de `LicenseFileService` si algún formato evoluciona (§8 D2, §20.3 #9).
+  - `{expiry}` = cadena vacía si `SubscriptionExpiryUtc` es `null`; en otro caso **normalizado a UTC**
+    (`Kind == Local` → `ToUniversalTime()`; `Kind == Unspecified` → `DateTime.SpecifyKind(v, Utc)`),
+    **truncado a segundos enteros**, formateado `yyyy-MM-ddTHH:mm:ss'Z'` con `CultureInfo.InvariantCulture`.
+    Motivo: `DateTime.ToString("O")` varía por `Kind` (offset según la zona de la máquina) y emite 7
+    dígitos fraccionarios que Postgres `timestamptz` trunca a 6 → la firma dejaba de verificar
+    cross-máquina y tras round-trip por BD. La expiración de una licencia no necesita sub-segundo.
+- `Verify` **blinda entradas** (§8 D2 M-1): `ArgumentNullException.ThrowIfNull` para `license` y
+  `publicKey`; `signature is null or { Length: 0 }` → `false`; `catch (CryptographicException)` → `false`.
 - `LicensingSystem.Tests/LicenseSignerTests.cs` — clase `LicenseSignerTests`: round-trip
-  sign→verify true con un `RSA` recién generado; cambiar de a uno cada campo canónico (`LicenseKey`,
-  `ProductId`, `ModelSnapshot`, `MaxActivations`, `SubscriptionExpiryUtc`) → verify false; una clave
-  pública RSA distinta → verify false; `CanonicalBytes` produce exactamente la cadena esperada para
-  un `License` de ejemplo con y sin `SubscriptionExpiryUtc`.
+  sign→verify true; tampering de cada campo canónico → verify false; clave pública distinta / firma
+  null / vacía / malformada → verify false sin lanzar; `license`/`publicKey` null → `ArgumentNullException`;
+  `CanonicalBytes` byte-exacto con y sin expiración; y **el mismo instante firmado como `Unspecified`,
+  `Utc`, `Local` y tras truncar sub-segundo → misma firma y `Verify` true en los cuatro casos**.
 
 **Done when**
 - [ ] WHEN `LicenseSigner.Sign(license)` output is passed to `Verify(license, signature, publicKey)` with the matching key THE SYSTEM SHALL return true.
 - [ ] WHEN any one canonical field (`LicenseKey`, `ProductId`, `ModelSnapshot`, `MaxActivations`, `SubscriptionExpiryUtc`) is changed and `Verify` is re-run with the original signature THE SYSTEM SHALL return false.
-- [ ] WHEN `Verify` is called with a different RSA public key THE SYSTEM SHALL return false.
-- [ ] WHEN `LicenseSigner.CanonicalBytes(license)` is decoded as UTF-8 THE SYSTEM SHALL equal `{LicenseKey}|{ProductId:D}|{(int)ModelSnapshot}|{MaxActivations}|{SubscriptionExpiryUtc:O-or-empty-string}` (empty string when `SubscriptionExpiryUtc` is null, round-trip `O` format otherwise).
+- [ ] WHEN `Verify` is called with a different RSA public key, a null `signature`, a zero-length `signature`, or a malformed `signature` THE SYSTEM SHALL return false without throwing; WHEN `license` or `publicKey` is null THE SYSTEM SHALL throw `ArgumentNullException`.
+- [ ] WHEN `LicenseSigner.CanonicalBytes(license)` is decoded as UTF-8 THE SYSTEM SHALL equal `licsig-v1|{LicenseKey}|{ProductId:D}|{(int)ModelSnapshot}|{MaxActivations}|{expiry}`, `{expiry}` empty when null else the value normalized to UTC, truncated to whole seconds, formatted `yyyy-MM-ddTHH:mm:ss'Z'` invariant.
+- [ ] WHEN the same instant is signed as `DateTimeKind.Unspecified`, as `Utc`, as `Local`, and after a round-trip that drops sub-second precision THE SYSTEM SHALL produce the same signature and `Verify` SHALL return true in every case.
 - [ ] WHEN `dotnet test --filter LicenseSigner` runs THE SYSTEM SHALL report all `LicenseSigner` tests passed, 0 failed.
 
 **Verify**
@@ -914,23 +948,24 @@ git tag step-05-license-signer
   singleton (`new LicenseSigner(rsa)`). Replica el patrón de fallback de `LicensingApi/Program.cs`.
 - `LicensingAdmin/Program.cs` — llamar `builder.Services.AddLicenseSigner(builder.Configuration)`
   una sola vez durante el registro de servicios.
-- `LicensingSystem.Tests/CryptoRegistrationTests.cs` — clase `CryptoRegistrationTests`, métodos
-  prefijados `LicenseSignerDi_` (para que `--filter LicenseSignerDi` los seleccione): construye un
-  `ServiceCollection` como `Program.cs`, llama `AddLicenseSigner` con un PEM válido en un
-  `IConfiguration` en memoria y asserta que `ILicenseSigner` resuelve; repite sin PEM y asserta que
-  también resuelve (fallback) y que se emitió un warning (con un `ILogger` de captura).
+- `LicensingSystem.Tests/CryptoRegistrationTests.cs` — clase `CryptoRegistrationTests` (nombres de
+  método normales; **no** uses el prefijo `LicenseSignerDi_` — colisiona con `--filter LicenseSigner`
+  del paso 5 por ser substring de FQN). Construye un `ServiceCollection` como `Program.cs`, llama
+  `AddLicenseSigner` con un PEM válido en un `IConfiguration` en memoria y asserta que `ILicenseSigner`
+  resuelve; repite sin PEM y asserta que también resuelve (fallback) y que se emitió un warning (con
+  un `ILogger` de captura). Puerta: `dotnet test --filter CryptoRegistration`.
 
 **Done when**
 - [ ] WHEN `AddLicenseSigner(services, config)` runs with `Crypto:RsaPrivateKeyPem` set to a valid PEM THE SYSTEM SHALL register `ILicenseSigner` such that `GetRequiredService<ILicenseSigner>()` resolves without throwing.
 - [ ] WHEN `AddLicenseSigner(services, config)` runs with no `Crypto:RsaPrivateKeyPem` configured THE SYSTEM SHALL still resolve `ILicenseSigner` using an in-memory RSA key and SHALL log one warning.
 - [ ] WHEN `dotnet build LicensingSystem.sln` runs THE SYSTEM SHALL exit 0.
 - [ ] WHEN `LicensingAdmin/Program.cs` is inspected THE SYSTEM SHALL call `AddLicenseSigner(...)` exactly once.
-- [ ] WHEN `dotnet test --filter LicenseSignerDi` runs THE SYSTEM SHALL report all `LicenseSignerDi` tests passed, 0 failed.
+- [ ] WHEN `dotnet test --filter CryptoRegistration` runs THE SYSTEM SHALL report all `CryptoRegistrationTests` tests passed, 0 failed (the filter token contains no substring that also selects `LicenseSignerTests`).
 
 **Verify**
 ```bash
 dotnet build LicensingSystem.sln              # expect: exit 0
-dotnet test --filter LicenseSignerDi          # expect: exit 0 — all LicenseSignerDi tests pass
+dotnet test --filter CryptoRegistration       # expect: exit 0 — all CryptoRegistrationTests pass
 ```
 
 **Checkpoint**
@@ -944,19 +979,26 @@ git tag step-06-signer-di
 ### Step 7 — Servicio de hashing de contraseñas
 
 **Do**
-- `LicensingAdmin/Auth/PasswordHasherService.cs` según §8 D1: envuelve
-  `Microsoft.AspNetCore.Identity.PasswordHasher<AdminUser>`. `string Hash(string password)`;
-  `bool Verify(string hash, string password)` que devuelve `false` en
-  `PasswordVerificationResult.Failed` y no lanza ante un `hash` malformado.
+- `LicensingAdmin/Auth/PasswordHasherService.cs` según §8 D1: `public sealed class
+  PasswordHasherService` con **constructor que recibe un `PasswordHasher<AdminUser>` inyectado**
+  (alimentado por `IOptions<PasswordHasherOptions>` de DI) — **no** `_inner = new()` en field-init,
+  para que el paso 8 pueda subir el `IterationCount` (§8 D1 M-1). `string Hash(string password)`;
+  `bool Verify(string hash, string password)` **empieza con** `if (string.IsNullOrEmpty(hash) ||
+  password is null) return false;`, devuelve `false` en `PasswordVerificationResult.Failed`,
+  `catch (FormatException) => false` para hash no decodable — **nunca lanza** (§8 D1 M-2: un campo
+  de formulario Blazor puede llegar `null`).
 - `LicensingSystem.Tests/PasswordHasherServiceTests.cs` — clase `PasswordHasherServiceTests`:
-  hash luego verify true; contraseña equivocada → false; hashear el mismo input dos veces produce
-  cadenas distintas (salt por hash); verify contra `"garbage"` → false sin excepción.
+  hash→verify true; contraseña equivocada → false; salt por hash; `Verify("garbage", "x")` → false;
+  **`Verify(null, "x")`, `Verify("", "x")` y `Verify(hash, null)` → false sin excepción**; el ctor
+  acepta un `PasswordHasher<AdminUser>` construido con `Options.Create(new PasswordHasherOptions{
+  IterationCount = 210_000 })` y sigue funcionando.
 
 **Done when**
 - [ ] WHEN `Hash(p)` output is passed to `Verify(hash, p)` THE SYSTEM SHALL return true.
 - [ ] WHEN `Verify(hash, wrongPassword)` is called THE SYSTEM SHALL return false.
 - [ ] WHEN the same password is hashed twice THE SYSTEM SHALL produce two different hash strings.
-- [ ] WHEN `Verify` is called with a malformed or non-matching hash string THE SYSTEM SHALL return false and SHALL NOT throw.
+- [ ] WHEN `Verify` is called with a malformed, non-matching, `null`, or empty `hash`, or with a `null` `password` THE SYSTEM SHALL return false and SHALL NOT throw.
+- [ ] WHEN `PasswordHasherService` is constructed THE SYSTEM SHALL take an injected `PasswordHasher<AdminUser>` (fed by `IOptions<PasswordHasherOptions>`) rather than a fixed field initializer.
 - [ ] WHEN `dotnet test --filter PasswordHasher` runs THE SYSTEM SHALL report all `PasswordHasher` tests passed, 0 failed.
 
 **Verify**
@@ -986,7 +1028,10 @@ git tag step-07-password-hasher
   "/Account/Login"; o.AccessDeniedPath = "/Account/Login"; o.Cookie.HttpOnly = true; o.Cookie.SecurePolicy
   = CookieSecurePolicy.SameAsRequest; o.SlidingExpiration = true; })`; `services.AddAdminAuthorization()`;
   y `app.UseAuthentication(); app.UseAuthorization();` **entre** `app.UseRouting()` y
-  `app.MapBlazorHub()` (orden crítico — el `awk` del Verify lo comprueba).
+  `app.MapBlazorHub()` (orden crítico — el `awk` del Verify lo comprueba). Además
+  `services.Configure<PasswordHasherOptions>(o => o.IterationCount = 210_000)` — OWASP 2024 para
+  PBKDF2-HMAC-SHA512 (el `PasswordHasher<AdminUser>` del shared framework por defecto usa 100 000);
+  `PasswordHasherService` (paso 7) lo recibe por DI (§8 D1 M-1, §20.3 #10).
 - `LicensingAdmin/App.razor` — reemplazar `<RouteView>` por `<CascadingAuthenticationState>` +
   `<Router>` + `<AuthorizeRouteView DefaultLayout="typeof(MainLayout)">` con `<NotAuthorized>` que
   renderiza un componente `RedirectToLogin` (navega a `/Account/Login?returnUrl=`).
@@ -1002,7 +1047,7 @@ git tag step-07-password-hasher
 - [ ] WHEN a `ClaimsPrincipal` in role `ReadOnlyViewer` is checked THE SYSTEM SHALL satisfy `ViewerAccess` and fail `ReviewAccess`, `IssueAccess`, `AdminUserAccess`.
 - [ ] WHEN a `ClaimsPrincipal` in role `SupportStaff` is checked THE SYSTEM SHALL satisfy `ViewerAccess`, `ReviewAccess`, `IssueAccess` and fail `AdminUserAccess`.
 - [ ] WHEN a `ClaimsPrincipal` in role `SuperAdmin` is checked THE SYSTEM SHALL satisfy all four policies, and WHEN an unauthenticated `ClaimsPrincipal` is checked THE SYSTEM SHALL fail all four policies and the fallback policy.
-- [ ] WHEN `LicensingAdmin/Program.cs` is inspected THE SYSTEM SHALL place `app.UseAuthentication()` after `app.UseRouting()` and before `app.MapBlazorHub()`, and SHALL set an authorization `FallbackPolicy` that requires an authenticated user.
+- [ ] WHEN `LicensingAdmin/Program.cs` is inspected THE SYSTEM SHALL place `app.UseAuthentication()` after `app.UseRouting()` and before `app.MapBlazorHub()`, SHALL set an authorization `FallbackPolicy` that requires an authenticated user, and SHALL configure `PasswordHasherOptions.IterationCount` to at least 210000.
 - [ ] WHEN `dotnet build LicensingSystem.sln` runs THE SYSTEM SHALL exit 0 and `dotnet test --filter AuthPolicies` SHALL report all tests passed, 0 failed.
 
 **Verify**
@@ -1346,7 +1391,7 @@ Correr la puerta completa.
 - [ ] WHEN `dotnet build LicensingSystem.sln -warnaserror` runs THE SYSTEM SHALL exit 0 with no analyzer warning escalated to an error.
 - [ ] WHEN `dotnet test` runs the full suite THE SYSTEM SHALL exit 0 with 0 failed and 0 skipped.
 - [ ] WHEN `grep -RIl "support-staff@vendor.com" LicensingAdmin/` runs THE SYSTEM SHALL find no match and exit 1.
-- [ ] WHEN `git grep -n "Password=***REDACTED***" -- ':!docs/blueprint'` runs THE SYSTEM SHALL find no match and exit 1.
+- [ ] WHEN `git grep -n "Password=***REDACTED***" -- ':!docs/blueprint' ':!tasks.json'` runs THE SYSTEM SHALL find no match and exit 1.
 - [ ] WHEN this step's own checkpoint tag exists THE SYSTEM SHALL make `git tag -l 'step-*'` list exactly 16 tags, one per build step.
 
 **Verify**
@@ -1354,7 +1399,7 @@ Correr la puerta completa.
 dotnet build LicensingSystem.sln -warnaserror         # expect: exit 0, 0 warnings
 dotnet test                                           # expect: exit 0 — 0 failed, 0 skipped
 grep -RIl "support-staff@vendor.com" LicensingAdmin/; test $? -eq 1   # expect: exit 0 (no match)
-git grep -n "Password=***REDACTED***" -- ':!docs/blueprint'; test $? -eq 1  # expect: exit 0 (no match in any tracked file outside the bundle)
+git grep -n "Password=***REDACTED***" -- ':!docs/blueprint' ':!tasks.json'; test $? -eq 1  # expect: exit 0 (no match in any tracked file outside the bundle)
 ```
 
 **Checkpoint**
@@ -1381,7 +1426,7 @@ on a running codebase, not a migration.
 |---|---|---|
 | .NET SDK | 8.0.4xx o más nuevo (TFM `net8.0`, sin `global.json`) | `dotnet --version` |
 | `dotnet-ef` (global tool) | 8.x | `dotnet ef --version` — **no se usa en este slice**; se instala por si un futuro slice lo necesita |
-| PostgreSQL | 15+ accesible en `172.16.101.12:5432` | `psql -h 172.16.101.12 -U licensing -d licensing_app -c 'select 1'` — **ni `dotnet build` ni `dotnet test` lo necesitan** (el test de pipeline usa una cadena ficticia y no conecta); solo los chequeos `# manual:` y ejecutar las apps |
+| PostgreSQL | 15+ accesible en `172.16.101.12:5432` | `psql -h <host> -U <user> -d licensing_app -c 'select 1'` — **ni `dotnet build` ni `dotnet test` lo necesitan** (el test de pipeline usa una cadena ficticia y no conecta); solo los chequeos `# manual:` y ejecutar las apps |
 
 ### Accounts to create first
 
@@ -1809,7 +1854,7 @@ dotnet restore LicensingSystem.sln                    # expect: exit 0
 dotnet build LicensingSystem.sln -warnaserror         # expect: exit 0, 0 warnings
 dotnet test                                           # expect: exit 0, 0 failed, 0 skipped
 grep -RIl "support-staff@vendor.com" LicensingAdmin/; test $? -eq 1     # expect: exit 0 (grep sale 1: sin coincidencia)
-git grep -n "Password=***REDACTED***" -- ':!docs/blueprint'; test $? -eq 1   # expect: exit 0 (git grep sale 1: sin coincidencia en archivos rastreados fuera del bundle)
+git grep -n "Password=***REDACTED***" -- ':!docs/blueprint' ':!tasks.json'; test $? -eq 1   # expect: exit 0 (git grep sale 1: sin coincidencia en archivos rastreados fuera del bundle)
 ```
 
 No hay `test:e2e` ni comando de accesibilidad automatizado en este slice — se declara.
@@ -1842,7 +1887,7 @@ Más estas puertas manuales, cada una comprobada una vez antes de publicar:
 - [ ] §9.1 no aplica — nada que verificar.
 - [ ] Todo Non-Goal de §1 sigue sin construir.
 - [ ] Cada variable de §10 está puesta en producción y ausente del repo
-      (`git grep -n "Password=***REDACTED***" -- ':!docs/blueprint'` → exit 1;
+      (`git grep -n "Password=***REDACTED***" -- ':!docs/blueprint' ':!tasks.json'` → exit 1;
       `dotnet user-secrets list --project LicensingApi` y `--project LicensingAdmin` muestran la
       cadena; el entorno de prod tiene `ConnectionStrings__LicensingDb` y `Crypto__RsaPrivateKeyPem`).
 - [ ] Pase manual del paso 14: `dotnet run --project LicensingAdmin` contra `172.16.101.12`, sembrar
@@ -1862,7 +1907,11 @@ Más estas puertas manuales, cada una comprobada una vez antes de publicar:
 |---|---|---|---|---|
 | El fallback RSA en memoria queda activo en prod (PEM no configurado) e invalida cada firma emitida al reiniciar | M | H | Warning "in-memory RSA fallback" en los logs de prod; firmas que dejan de verificar tras un reinicio | Puerta manual de §20.1 comprueba `Crypto__RsaPrivateKeyPem` en prod; `CryptoRegistration` loguea el warning en cada arranque sin PEM — Owner: operaciones |
 | La clave privada RSA ahora vive también en el panel (radio de exposición mayor) | M | H | Auditoría de quién puede leer user-secrets/env del host del panel | §20.3 #2 registra el disparador de reversión (mover la emisión a un endpoint admin de la API) — Owner: arquitecto |
-| `dotnet test --filter <X>` sale 0 si un typo del filtro no selecciona nada (puerta vacía) | M | M | Un `--filter` verde pero la suite total no crece | `<VSTestTreatNoTestsAsError>true</VSTestTreatNoTestsAsError>` en el `.csproj` del paso 1; los pasos 14 y 16 corren `dotnet test` sin filtro; cada paso nombra su clase de test — Owner: builder |
+| `dotnet test --filter <X>` sale 0 si un typo del filtro no selecciona nada (puerta vacía) | M | M | Un `--filter` verde pero la suite total no crece | `LicensingSystem.Tests/.runsettings` con `<TreatNoTestsAsError>true</TreatNoTestsAsError>` referenciado por `<RunSettingsFilePath>` en el `.csproj` (paso 1 — la propiedad MSBuild `<VSTestTreatNoTestsAsError>` **no existe**); los pasos 14 y 16 corren `dotnet test` sin filtro; los tokens de `--filter` se eligen sin prefijo colisionante (`CryptoRegistration`, no `LicenseSignerDi`) — Owner: builder |
+| El nodo `dev` tiene SDK 8.0.4xx **y** 10.0.4xx; sin pin, `dotnet` compila `net8.0` con analizadores de otra major → `dotnet build -warnaserror` del paso 16 puede fallar por warnings ajenos al código | M | M | Warnings nuevos al pasar de 8.x a 10.x SDK; `-warnaserror` rojo en el paso 16 sin cambio de código | `global.json` en la raíz (paso 1) fija SDK `8.0.4xx` con `rollForward: latestFeature`; §20.3 #8 registra la reversión — Owner: builder |
+| `CanonicalBytes` con formato de fecha no determinista rompe la autenticidad offline (firma no verifica cross-máquina / tras BD) | M | H | `Verify` false para una licencia legítima tras recargar de Postgres o en otra zona horaria | Paso 5 normaliza a UTC y trunca a segundos (`yyyy-MM-ddTHH:mm:ss'Z'`); `LicenseFileService` tiene el mismo patrón sin normalizar pero está **congelado** (§20.4) — Owner: arquitecto |
+| `PasswordHasher` del shared framework usa 100 000 iteraciones PBKDF2-HMAC-SHA512, < OWASP 2024 (≥210 000) | M | M | Auditoría de coste de hashing; fuerza bruta más barata de lo previsto | Paso 8 fija `PasswordHasherOptions.IterationCount = 210_000`; `PasswordHasherService` (paso 7) lo recibe por DI (§20.3 #10) — Owner: builder |
+| `***REDACTED***` del baseline (`b877e55:LicensingApi/appsettings.json`) es recuperable del historial git — hallazgo ALTO abierto | M | H | `git show b877e55:...` expone la credencial; el bare repo compartido y las ramas `task/*` la propagan | **Rotar `***REDACTED***` en el PostgreSQL `172.16.101.12`** (acción de operaciones/DBA); tras la rotación la exposición del historial queda inerte y se documenta (repo interno de LAN, no se purga historial) — Owner: operaciones + arquitecto |
 | `xunit.v3` 3.2.2 / runner 3.1.5 / `Mvc.Testing` 8.0.30 son relativamente nuevos; incompatibilidad con el SDK del nodo `dev` | L | M | `dotnet test` falla al descubrir o al arrancar el host de test en el paso 1 o el `WebApplicationFactory` no levanta en el paso 10 | El paso 1 es la primera puerta; si `xunit.v3` falla, se degrada a `xunit` v2 y se anota; `Mvc.Testing` 8.0.30 mantiene todas sus transitivas en 8.0.x — Owner: builder |
 | `WebApplicationFactory<Program>` de un Blazor Server no produce el 302 esperado (el `RedirectToLogin` no dispara en SSR) | M | M | `AuthorizationPipelineTests` falla en la aserción de `Location` | El `RedirectToLogin` estándar de la plantilla navega vía `NavigationManager`, que en SSR lanza y el framework lo convierte en 302; si aun así falla, respaldar con `options.FallbackPolicy` + `MapRazorPages().RequireAuthorization()` y ajustar el test — Owner: builder |
 | .NET 8 sale de soporte el 2026-11-10; la línea 8.0.x deja de recibir parches de seguridad | M | M | Avisos de fin de vida de .NET; CVEs sin parche en 8.0.x | Planificar el salto a net10.0 (LTS) en un slice posterior; este slice se mantiene en 8.0.x por ser brownfield — Owner: arquitecto |
@@ -1879,19 +1928,26 @@ Más estas puertas manuales, cada una comprobada una vez antes de publicar:
 | 5 | Login/logout como Razor Pages | Componentes Blazor | `HttpContext.SignInAsync` necesita el `HttpContext` crudo, inaccesible desde un componente | Blazor gane una API soportada de sign-in por cookie desde componente |
 | 6 | Tests unitarios puros + un test de pipeline HTTP sin BD; integración de datos con Postgres diferida a `# manual:` | `Testcontainers` / `EntityFrameworkCore.InMemory` o una BD de test dedicada en CI | No hay CI; el valor de la integración de datos automatizada no justifica su coste en este slice; el `WebApplicationFactory` con cadena ficticia cubre el pipeline de auth sin BD | Se añade CI, o un incidente de datos muestra que los fakes ocultaron un bug de EF |
 | 7 | `FallbackPolicy` que exige sesión en toda ruta salvo `[AllowAnonymous]`, además del `[Authorize]` por página | Solo `[Authorize]` por página | Fail-closed: si un builder olvida un atributo, la página degrada a "cualquier autenticado", no a anónimo; y el pipeline es testeable desde el paso 8 | Se necesite exponer rutas anónimas nuevas sin `[AllowAnonymous]` explícito (improbable) |
+| 8 | `global.json` en la raíz fija el SDK a `8.0.4xx` (`rollForward: latestFeature`) | Sin `global.json` (como decía §2 inicialmente) | El nodo `dev` tiene 8.0.4xx y 10.0.4xx; sin pin `dotnet` elige el 10.x y compila `net8.0` con analizadores de otra major → riesgo en `dotnet build -warnaserror` del paso 16 | El equipo estandariza en un SDK más nuevo único y valida `net8.0` bajo él, o se migra el TFM |
+| 9 | `CanonicalBytes` firma un payload **normalizado a UTC + truncado a segundos** con prefijo de dominio `licsig-v1|` | El formato `"O"` literal que decía el criterio 4 original | `"O"` varía por `DateTime.Kind` (offset de la máquina) y emite 7 dígitos fraccionarios que Postgres trunca a 6 → la firma dejaba de verificar cross-máquina y tras round-trip por BD; el prefijo evita confusión de tipos si algún formato evoluciona con la misma clave RSA | Se necesite precisión sub-segundo en la expiración (improbable para una licencia), o `LicenseFileService` deje de estar congelado y se unifique el formato |
+| 10 | `PasswordHasherService` con `PasswordHasher<AdminUser>` inyectado; el paso 8 fija `IterationCount = 210_000` | `_inner = new()` en field-init (100k iter, no configurable por DI) | OWASP 2024 pide ≥210 000 para PBKDF2-HMAC-SHA512; inyectar deja el coste bajo control del app sin salirse del alcance de E1-T7 | Se adopte Argon2id (paquete nuevo), o el panel gane rate-limiting/lockout que permita bajar el coste |
+| 11 | Riesgo aceptado: la firma de `License` no cubre `IssuedAtUtc` ni `Status`/revocación | Firmar también `IssuedAtUtc` (+ opcional `MaxOfflineDays`) | Diseño "snapshot de emisión": la revocación es 100% online (`/checkin` consulta `licenses.Status` en BD); una licencia perpetua no necesita ancla temporal firmada en este slice | Aparezca un requisito de validación offline con caducidad de confianza, o de revocación que funcione sin conexión |
 
 ### 20.4 What to build next
 
-Del §1 Non-Goals, en orden:
+Del §1 Non-Goals y de los hallazgos diferidos del build, en orden:
 
 1. **Rate limiting en `/api/activate` y `/api/checkin`** — disparador: antes de exponer la API a
    internet (sigue como `TODO` en `ActivationController`).
-2. **Migraciones EF Core reales** que reemplacen `001_initial_schema.sql` — disparador: el primer
+2. **Normalizar el formato de fecha en `LicensingApi/Services/LicenseFileService.cs`** (mismo patrón
+   `"O"` sin normalizar que se arregló en `LicenseSigner`) — disparador: cuando el contrato del
+   archivo de activación con el DLL pueda versionarse; hoy está **congelado** (§5).
+3. **Migraciones EF Core reales** que reemplacen `001_initial_schema.sql` — disparador: el primer
    slice que necesite un cambio de esquema.
-3. **Pantalla de Reportes / exportación PDF·XLS** — disparador: compliance pide exportaciones.
-4. **Pantalla de Notification Settings (config SMTP)** — disparador: se priorizan las notificaciones
+4. **Pantalla de Reportes / exportación PDF·XLS** — disparador: compliance pide exportaciones.
+5. **Pantalla de Notification Settings (config SMTP)** — disparador: se priorizan las notificaciones
    por email.
-5. **Desacoplar `LicensingAdmin` → llamadas a endpoints admin de `LicensingApi`** — disparador:
+6. **Desacoplar `LicensingAdmin` → llamadas a endpoints admin de `LicensingApi`** — disparador:
    admin y API se separan en hosts distintos (ver §20.3 #2).
 
 ---

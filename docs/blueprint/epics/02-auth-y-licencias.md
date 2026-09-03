@@ -22,8 +22,7 @@ No necesitas ningún otro archivo para completar este epic. Todo lo de abajo se 
 
 C# / .NET 8 (`net8.0`) · Blazor Server + MudBlazor 7.15.0 · ASP.NET Core Web API · PostgreSQL 15+ ·
 EF Core 8 (Npgsql 8.0.10) · cookie auth local contra `admin_users` · host único Windows/IIS.
-Package manager: NuGet (integrado en el SDK). Runtime: TFM `net8.0`, sin `global.json` — SDK
-8.0.4xx+. Las versiones de paquete están en los `.csproj` y el lockfile — léelas, no las adivines.
+Package manager: NuGet (integrado en el SDK). Runtime: TFM `net8.0`, pin de SDK 8.0.4xx via `global.json` (T1, rollForward latestFeature). Las versiones de paquete están en los `.csproj` y el lockfile — léelas, no las adivines.
 
 | Tarea | Comando |
 |---|---|
@@ -500,7 +499,7 @@ este paso — un `Verify` no puede depender de lo que produce su propio `Checkpo
 1. **WHEN** `dotnet build LicensingSystem.sln -warnaserror` runs **THE SYSTEM SHALL** exit 0 with no analyzer warning escalated to an error.
 2. **WHEN** `dotnet test` runs the full suite **THE SYSTEM SHALL** exit 0 with 0 failed and 0 skipped.
 3. **WHEN** `grep -RIl "support-staff@vendor.com" LicensingAdmin/` runs **THE SYSTEM SHALL** find no match and exit 1.
-4. **WHEN** `git grep -n "Password=***REDACTED***" -- ':!docs/blueprint'` runs **THE SYSTEM SHALL** find no match and exit 1.
+4. **WHEN** `git grep -n "Password=***REDACTED***" -- ':!docs/blueprint' ':!tasks.json'` runs **THE SYSTEM SHALL** find no match and exit 1.
 5. **WHEN** this step's own checkpoint tag exists **THE SYSTEM SHALL** make `git tag -l 'step-*'` list exactly 16 tags, one per build step.
 
 **Verify**
@@ -509,7 +508,7 @@ este paso — un `Verify` no puede depender de lo que produce su propio `Checkpo
 dotnet build LicensingSystem.sln -warnaserror
 dotnet test
 grep -RIl "support-staff@vendor.com" LicensingAdmin/; test $? -eq 1
-git grep -n "Password=***REDACTED***" -- ':!docs/blueprint'; test $? -eq 1
+git grep -n "Password=***REDACTED***" -- ':!docs/blueprint' ':!tasks.json'; test $? -eq 1
 ```
 
 **Checkpoint**
@@ -527,12 +526,12 @@ test "$(git tag -l 'step-*' | wc -l)" -eq 16   # expect: exit 0 — 16 tags, uno
 El epic está hecho cuando cada tarea está `done` **y**:
 
 1. **WHEN** `dotnet build LicensingSystem.sln -warnaserror && dotnet test` runs from the repo root **THE SYSTEM SHALL** exit 0 with 0 failed and 0 skipped across the whole suite.
-2. **WHEN** `grep -RIl "support-staff@vendor.com" LicensingAdmin/` and `git grep -n "Password=***REDACTED***" -- ':!docs/blueprint'` run **THE SYSTEM SHALL** each find no match and exit 1.
+2. **WHEN** `grep -RIl "support-staff@vendor.com" LicensingAdmin/` and `git grep -n "Password=***REDACTED***" -- ':!docs/blueprint' ':!tasks.json'` run **THE SYSTEM SHALL** each find no match and exit 1.
 
 ```bash
 dotnet build LicensingSystem.sln -warnaserror && dotnet test
 grep -RIl "support-staff@vendor.com" LicensingAdmin/; test $? -eq 1
-git grep -n "Password=***REDACTED***" -- ':!docs/blueprint'; test $? -eq 1
+git grep -n "Password=***REDACTED***" -- ':!docs/blueprint' ':!tasks.json'; test $? -eq 1
 ```
 
 ## Pitfalls

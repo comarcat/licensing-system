@@ -9,16 +9,22 @@
       "WHEN `dotnet build LicensingSystem.sln` runs THE SYSTEM SHALL exit 0 with `LicensingSystem.Tests` present as a fourth project in the solution.",
       "WHEN `dotnet test` runs from the repo root THE SYSTEM SHALL report 1 passed, 0 failed, 0 skipped.",
       "WHEN `LicensingApi.csproj` and `LicensingAdmin.csproj` are inspected THE SYSTEM SHALL each contain a non-empty `<UserSecretsId>` element.",
-      "WHEN `LicensingSystem.Tests.csproj` is inspected THE SYSTEM SHALL set `<IsPackable>false</IsPackable>` and reference exactly the five pinned test packages (Microsoft.NET.Test.Sdk, xunit.v3, xunit.runner.visualstudio, coverlet.collector, Microsoft.AspNetCore.Mvc.Testing) plus project references to `LicensingCore` and `LicensingAdmin`."
+      "WHEN `LicensingSystem.Tests.csproj` is inspected THE SYSTEM SHALL set `<IsPackable>false</IsPackable>`, reference exactly the five pinned test packages (Microsoft.NET.Test.Sdk, xunit.v3, xunit.runner.visualstudio, coverlet.collector, Microsoft.AspNetCore.Mvc.Testing) plus project references to `LicensingCore` and `LicensingAdmin`, and point `<RunSettingsFilePath>` at a committed `LicensingSystem.Tests/.runsettings`.",
+      "WHEN `LicensingSystem.Tests/.runsettings` is inspected THE SYSTEM SHALL set `<TreatNoTestsAsError>true</TreatNoTestsAsError>` so that a `dotnet test --filter <nonexistent>` exits non-zero instead of a false green.",
+      "WHEN `dotnet --version` runs at the repo root THE SYSTEM SHALL report an `8.0.4xx` SDK, selected by a committed repo-root `global.json` with `rollForward: latestFeature`."
     ],
     "verify": [
       "dotnet build LicensingSystem.sln",
-      "dotnet test"
+      "dotnet test",
+      "grep -q 'TreatNoTestsAsError' LicensingSystem.Tests/.runsettings && grep -q 'RunSettingsFilePath' LicensingSystem.Tests/LicensingSystem.Tests.csproj",
+      "dotnet --version | grep -q '^8[.]0[.]'"
     ],
     "checkpoint": "step-01-tests-scaffold",
     "files": [
       "LicensingSystem.Tests/LicensingSystem.Tests.csproj",
+      "LicensingSystem.Tests/.runsettings",
       "LicensingSystem.Tests/SmokeTests.cs",
+      "global.json",
       "LicensingSystem.sln",
       "LicensingApi/LicensingApi.csproj",
       "LicensingAdmin/LicensingAdmin.csproj"
@@ -60,13 +66,13 @@
     "acceptance": [
       "WHEN `LicensingApi/appsettings.json` and `LicensingAdmin/appsettings.json` are inspected THE SYSTEM SHALL each set `ConnectionStrings:LicensingDb` to the empty string.",
       "WHEN `grep -RIl \"Password=\" LicensingApi/appsettings.json LicensingAdmin/appsettings.json` runs THE SYSTEM SHALL find no match and exit 1.",
-      "WHEN `git grep -n \"Password=***REDACTED***\" -- ':!docs/blueprint'` runs THE SYSTEM SHALL find no match and exit 1.",
+      "WHEN `git grep -n \"Password=***REDACTED***\" -- ':!docs/blueprint' ':!tasks.json'` runs THE SYSTEM SHALL find no match and exit 1.",
       "WHEN `LicensingSystem_README.md` and `LicensingApi/README.md` are inspected THE SYSTEM SHALL show the connection string only as a placeholder with no real password value.",
       "WHEN `dotnet build LicensingSystem.sln` runs THE SYSTEM SHALL exit 0."
     ],
     "verify": [
       "grep -RIl \"Password=\" LicensingApi/appsettings.json LicensingAdmin/appsettings.json; test $? -eq 1",
-      "git grep -n \"Password=***REDACTED***\" -- ':!docs/blueprint'; test $? -eq 1",
+      "git grep -n \"Password=***REDACTED***\" -- ':!docs/blueprint' ':!tasks.json'; test $? -eq 1",
       "dotnet build LicensingSystem.sln"
     ],
     "checkpoint": "step-03-secret-scrub",
@@ -109,8 +115,9 @@
     "acceptance": [
       "WHEN `LicenseSigner.Sign(license)` output is passed to `Verify(license, signature, publicKey)` with the matching key THE SYSTEM SHALL return true.",
       "WHEN any one canonical field (`LicenseKey`, `ProductId`, `ModelSnapshot`, `MaxActivations`, `SubscriptionExpiryUtc`) is changed and `Verify` is re-run with the original signature THE SYSTEM SHALL return false.",
-      "WHEN `Verify` is called with a different RSA public key THE SYSTEM SHALL return false.",
-      "WHEN `LicenseSigner.CanonicalBytes(license)` is decoded as UTF-8 THE SYSTEM SHALL equal `{LicenseKey}|{ProductId:D}|{(int)ModelSnapshot}|{MaxActivations}|{SubscriptionExpiryUtc:O-or-empty-string}` (empty string when `SubscriptionExpiryUtc` is null, round-trip `O` format otherwise).",
+      "WHEN `Verify` is called with a different RSA public key, a null `signature`, a zero-length `signature`, or a malformed `signature` THE SYSTEM SHALL return false without throwing; WHEN `license` or `publicKey` is null THE SYSTEM SHALL throw `ArgumentNullException`.",
+      "WHEN `LicenseSigner.CanonicalBytes(license)` is decoded as UTF-8 THE SYSTEM SHALL equal `licsig-v1|{LicenseKey}|{ProductId:D}|{(int)ModelSnapshot}|{MaxActivations}|{expiry}`, where `{expiry}` is the empty string when `SubscriptionExpiryUtc` is null and otherwise the value normalized to UTC (`Local` via `ToUniversalTime()`, `Unspecified` treated as UTC), truncated to whole seconds, formatted `yyyy-MM-ddTHH:mm:ss'Z'` with `CultureInfo.InvariantCulture`.",
+      "WHEN the same instant is signed as `DateTimeKind.Unspecified`, as `Utc`, as `Local`, and after a round-trip that drops sub-second precision THE SYSTEM SHALL produce the same signature and `Verify` SHALL return true in every case.",
       "WHEN `dotnet test --filter LicenseSigner` runs THE SYSTEM SHALL report all `LicenseSigner` tests passed, 0 failed."
     ],
     "verify": [
@@ -135,11 +142,11 @@
       "WHEN `AddLicenseSigner(services, config)` runs with no `Crypto:RsaPrivateKeyPem` configured THE SYSTEM SHALL still resolve `ILicenseSigner` using an in-memory RSA key and SHALL log one warning.",
       "WHEN `dotnet build LicensingSystem.sln` runs THE SYSTEM SHALL exit 0.",
       "WHEN `LicensingAdmin/Program.cs` is inspected THE SYSTEM SHALL call `AddLicenseSigner(...)` exactly once.",
-      "WHEN `dotnet test --filter LicenseSignerDi` runs THE SYSTEM SHALL report all `LicenseSignerDi` tests passed, 0 failed."
+      "WHEN `dotnet test --filter CryptoRegistration` runs THE SYSTEM SHALL report all `CryptoRegistrationTests` tests passed, 0 failed (the filter token contains no substring that also selects `LicenseSignerTests`)."
     ],
     "verify": [
       "dotnet build LicensingSystem.sln",
-      "dotnet test --filter LicenseSignerDi"
+      "dotnet test --filter CryptoRegistration"
     ],
     "checkpoint": "step-06-signer-di",
     "files": [
@@ -159,7 +166,8 @@
       "WHEN `Hash(p)` output is passed to `Verify(hash, p)` THE SYSTEM SHALL return true.",
       "WHEN `Verify(hash, wrongPassword)` is called THE SYSTEM SHALL return false.",
       "WHEN the same password is hashed twice THE SYSTEM SHALL produce two different hash strings.",
-      "WHEN `Verify` is called with a malformed or non-matching hash string THE SYSTEM SHALL return false and SHALL NOT throw.",
+      "WHEN `Verify` is called with a malformed, non-matching, `null`, or empty `hash`, or with a `null` `password` THE SYSTEM SHALL return false and SHALL NOT throw.",
+      "WHEN `PasswordHasherService` is constructed THE SYSTEM SHALL take an injected `PasswordHasher<AdminUser>` (fed by `IOptions<PasswordHasherOptions>` from DI) rather than a fixed field initializer, so the iteration count is configurable by `LicensingAdmin` at step 8.",
       "WHEN `dotnet test --filter PasswordHasher` runs THE SYSTEM SHALL report all `PasswordHasher` tests passed, 0 failed."
     ],
     "verify": [
@@ -183,7 +191,7 @@
       "WHEN a `ClaimsPrincipal` in role `ReadOnlyViewer` is checked THE SYSTEM SHALL satisfy `ViewerAccess` and fail `ReviewAccess`, `IssueAccess`, `AdminUserAccess`.",
       "WHEN a `ClaimsPrincipal` in role `SupportStaff` is checked THE SYSTEM SHALL satisfy `ViewerAccess`, `ReviewAccess`, `IssueAccess` and fail `AdminUserAccess`.",
       "WHEN a `ClaimsPrincipal` in role `SuperAdmin` is checked THE SYSTEM SHALL satisfy all four policies, and WHEN an unauthenticated `ClaimsPrincipal` is checked THE SYSTEM SHALL fail all four policies and the fallback policy.",
-      "WHEN `LicensingAdmin/Program.cs` is inspected THE SYSTEM SHALL place `app.UseAuthentication()` after `app.UseRouting()` and before `app.MapBlazorHub()`, and SHALL set an authorization `FallbackPolicy` that requires an authenticated user.",
+      "WHEN `LicensingAdmin/Program.cs` is inspected THE SYSTEM SHALL place `app.UseAuthentication()` after `app.UseRouting()` and before `app.MapBlazorHub()`, SHALL set an authorization `FallbackPolicy` that requires an authenticated user, and SHALL configure `PasswordHasherOptions.IterationCount` to at least 210000 (OWASP 2024 for PBKDF2-HMAC-SHA512).",
       "WHEN `dotnet build LicensingSystem.sln` runs THE SYSTEM SHALL exit 0 and `dotnet test --filter AuthPolicies` SHALL report all tests passed, 0 failed."
     ],
     "verify": [
@@ -405,14 +413,14 @@
       "WHEN `dotnet build LicensingSystem.sln -warnaserror` runs THE SYSTEM SHALL exit 0 with no analyzer warning escalated to an error.",
       "WHEN `dotnet test` runs the full suite THE SYSTEM SHALL exit 0 with 0 failed and 0 skipped.",
       "WHEN `grep -RIl \"support-staff@vendor.com\" LicensingAdmin/` runs THE SYSTEM SHALL find no match and exit 1.",
-      "WHEN `git grep -n \"Password=***REDACTED***\" -- ':!docs/blueprint'` runs THE SYSTEM SHALL find no match and exit 1.",
+      "WHEN `git grep -n \"Password=***REDACTED***\" -- ':!docs/blueprint' ':!tasks.json'` runs THE SYSTEM SHALL find no match and exit 1.",
       "WHEN this step's own checkpoint tag exists THE SYSTEM SHALL make `git tag -l 'step-*'` list exactly 16 tags, one per build step."
     ],
     "verify": [
       "dotnet build LicensingSystem.sln -warnaserror",
       "dotnet test",
       "grep -RIl \"support-staff@vendor.com\" LicensingAdmin/; test $? -eq 1",
-      "git grep -n \"Password=***REDACTED***\" -- ':!docs/blueprint'; test $? -eq 1"
+      "git grep -n \"Password=***REDACTED***\" -- ':!docs/blueprint' ':!tasks.json'; test $? -eq 1"
     ],
     "checkpoint": "step-16-smoke",
     "files": [
