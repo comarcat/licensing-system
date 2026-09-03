@@ -19,7 +19,14 @@ internal static class WebHostBuilderTestExtensions
 {
     public static IWebHostBuilder WithoutAdminSeeder(this IWebHostBuilder builder) =>
         builder.ConfigureTestServices(services =>
-            services.Remove(services.Single(d => d.ImplementationType == typeof(AdminSeeder))));
+        {
+            foreach (var descriptor in services
+                         .Where(d => d.ImplementationType == typeof(AdminSeeder))
+                         .ToList())
+            {
+                services.Remove(descriptor);
+            }
+        });
 }
 
 /// <summary>

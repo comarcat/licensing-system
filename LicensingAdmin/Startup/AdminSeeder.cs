@@ -48,26 +48,49 @@ public sealed class AdminSeeder(
         var email = config["Admin:BootstrapEmail"];
         var password = config["Admin:BootstrapPassword"];
 
-        await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
-        if (!ShouldSeed(!await db.AdminUsers.AnyAsync(cancellationToken), email, password))
+        try
         {
-            return;
-        }
+            await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+            if (!ShouldSeed(!await db.AdminUsers.AnyAsync(cancellationToken), email, password))
+            {
+                return;
+            }
 
-        // email/password are non-blank here (ShouldSeed). BuildSuperAdmin applies the
-        // same Trim()/ToLowerInvariant() to the configured value that it does anywhere.
-        var admin = BuildSuperAdmin(email!, password!, hasher);
-        db.AdminUsers.Add(admin);
-        db.AuditLogEntries.Add(new AuditLogEntry
+            // email/password are non-blank here (ShouldSeed). BuildSuperAdmin applies the
+            // same Trim()/ToLowerInvariant() to the configured value that it does anywhere.
+            var admin = BuildSuperAdmin(email!, password!, hasher);
+            db.AdminUsers.Add(admin);
+            db.AuditLogEntries.Add(new AuditLogEntry
+            {
+                Id = Guid.NewGuid(),
+                Actor = "system",
+                EntityType = "AdminUser",
+                EntityId = admin.Id.ToString(),
+                Action = "Created",
+            });
+            await db.SaveChangesAsync(cancellationToken);
+
+            // Warning, not Information: the operator must see this and rotate/remove
+            // Admin:BootstrapPassword now. Logs the id, never the email (PII / the
+            // most-privileged login identifier).
+            logger.LogWarning(
+                "Seeded bootstrap SuperAdmin (id {Id}). Remove Admin:BootstrapPassword from configuration now.",
+                admin.Id);
+        }
+        catch (DbUpdateException)
         {
-            Id = Guid.NewGuid(),
-            Actor = "system",
-            EntityType = "AdminUser",
-            EntityId = admin.Id.ToString(),
-            Action = "Created",
-        });
-        await db.SaveChangesAsync(cancellationToken);
-        logger.LogInformation("Seeded bootstrap SuperAdmin {Email}.", admin.Email);
+            // Concurrent startup (another host / overlapping deploy) inserted the first
+            // admin between our AnyAsync check and SaveChanges; the unique index on
+            // admin_users.Email rejected ours. Not an error — the bootstrap admin exists.
+            logger.LogInformation("Bootstrap SuperAdmin already seeded by another instance; skipping.");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // A transient DB failure at startup must not abort the host into a crash loop
+            // (IHostedService.StartAsync throwing aborts IHost.StartAsync). Surface it and
+            // let the host come up; the seed is retried on the next restart.
+            logger.LogError(ex, "Bootstrap SuperAdmin seeding failed; host startup continues, seed will retry on restart.");
+        }
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
