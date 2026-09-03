@@ -437,6 +437,6 @@
       "LicensingAdmin/Pages/PendingReview.razor",
       "LicensingSystem.Tests/CurrentAdminEmailEdgeCasesTests.cs"
     ],
-    "status": "pending"
+    "status": "done"
   }
 ]

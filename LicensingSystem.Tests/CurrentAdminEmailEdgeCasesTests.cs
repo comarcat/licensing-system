@@ -72,7 +72,7 @@ public class CurrentAdminEmailEdgeCasesTests
 
         var principal = new ClaimsPrincipal(new[] { anonymousPrimary, authenticatedSecondary });
 
-        Assert.True(principal.Identities.Any(i => i.IsAuthenticated));   // there IS an auth identity
+        Assert.Contains(principal.Identities, i => i.IsAuthenticated);   // there IS an auth identity
         Assert.Equal("", CurrentAdmin.Email(principal));                 // ...but Email still says ""
     }
 
