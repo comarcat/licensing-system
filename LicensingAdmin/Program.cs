@@ -1,6 +1,10 @@
 using LicensingAdmin.Auth;
 using LicensingCore.Configuration;
 using LicensingCore.Data;
+using LicensingCore.Entities;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using MudBlazor.Services;
 
@@ -25,16 +29,47 @@ builder.Services.AddDbContextFactory<AppDbContext>(options =>
 // otherwise a dev-only in-memory RSA key (logs one warning). See CryptoRegistration.
 builder.Services.AddLicenseSigner(builder.Configuration, builder.Environment);
 
+builder.Services
+    .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddCookie(o =>
+    {
+        o.LoginPath = "/Account/Login";
+        // Not /Account/Login: an authenticated user with an insufficient role must not
+        // bounce back to a login page that immediately re-redirects them (loop). E2-T2
+        // adds the [AllowAnonymous] /Account/AccessDenied page.
+        o.AccessDeniedPath = "/Account/AccessDenied";
+        o.Cookie.HttpOnly = true;
+        // The session cookie must never leave over plaintext HTTP in a real deployment.
+        o.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
+            ? CookieSecurePolicy.SameAsRequest
+            : CookieSecurePolicy.Always;
+        o.Cookie.SameSite = SameSiteMode.Lax;
+        o.SlidingExpiration = true;
+    });
+
+builder.Services.AddAdminAuthorization();
+
+// PBKDF2-HMAC-SHA512 @ >= 210_000 iteraciones (OWASP 2024). El PasswordHasherService
+// del paso 7 recibe este PasswordHasher<AdminUser> por DI.
+builder.Services.Configure<PasswordHasherOptions>(o => o.IterationCount = 210_000);
+builder.Services.AddSingleton<PasswordHasher<AdminUser>>();
+builder.Services.AddSingleton<PasswordHasherService>();
+
 var app = builder.Build();
 
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error");
     app.UseHsts();
+    // With HSTS on we assume the prod front is HTTPS; make the process reject plaintext.
+    app.UseHttpsRedirection();
 }
 
 app.UseStaticFiles();
 app.UseRouting();
+
+app.UseAuthentication();
+app.UseAuthorization();
 
 app.MapBlazorHub();
 app.MapFallbackToPage("/_Host");

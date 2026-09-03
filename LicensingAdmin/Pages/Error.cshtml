@@ -1,4 +1,7 @@
 @page "/Error"
+@attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
+@* AllowAnonymous so the FallbackPolicy (requires an authenticated user) does not itself
+   block the error page when an unauthenticated request faults. *@
 <!DOCTYPE html>
 <html>
 <head><meta charset="utf-8" /><title>Error</title></head>
