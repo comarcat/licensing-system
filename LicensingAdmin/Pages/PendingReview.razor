@@ -24,7 +24,8 @@ else
     @foreach (var a in _items)
     {
         <MudPaper Class="pa-4 mb-3" Elevation="1">
-            <MudGrid AlignItems="Center.Center">
+            @* align-center utility class instead of the non-existent MudGrid.AlignItems parameter (MUD0002). *@
+            <MudGrid Class="align-center">
                 <MudItem xs="12" md="4">
                     <MudText Typo="Typo.subtitle1">@a.License.Product.Name</MudText>
                     <MudText Typo="Typo.body2" Color="Color.Secondary" Style="font-family:monospace">
