@@ -39,3 +39,9 @@ Thumbs.db
 
 # Team artefacts local
 /status.local.md
+
+# graphify (local project-memory graph on nodo dev; not committed — Arquitecto 2026-09-02)
+graphify-out/
+.claude/skills/graphify/
+.claude/CLAUDE.md
+.claude/settings.json.graphify-bak
