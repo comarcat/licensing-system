@@ -2,7 +2,9 @@ using LicensingAdmin.Auth;
 using LicensingCore.Configuration;
 using LicensingCore.Data;
 using LicensingCore.Entities;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -45,6 +47,32 @@ builder.Services
             : CookieSecurePolicy.Always;
         o.Cookie.SameSite = SameSiteMode.Lax;
         o.SlidingExpiration = true;
+        // Session times out after 8h of inactivity (sliding renews it on use). The hard
+        // account check is OnValidatePrincipal below, which re-verifies against the DB
+        // that the account is still active and its role unchanged on every request.
+        o.ExpireTimeSpan = TimeSpan.FromHours(8);
+        o.Events = new CookieAuthenticationEvents
+        {
+            OnValidatePrincipal = async ctx =>
+            {
+                var email = ctx.Principal?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value;
+                var role = ctx.Principal?.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+                if (string.IsNullOrEmpty(email))
+                {
+                    ctx.RejectPrincipal();
+                    return;
+                }
+
+                var lookup = ctx.HttpContext.RequestServices.GetRequiredService<IAdminUserLookup>();
+                var admin = await lookup.FindByEmailAsync(email, ctx.HttpContext.RequestAborted);
+                if (admin is not { IsActive: true } || admin.Role.ToString() != role)
+                {
+                    ctx.RejectPrincipal();
+                    await ctx.HttpContext.SignOutAsync(
+                        Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationDefaults.AuthenticationScheme);
+                }
+            },
+        };
     });
 
 builder.Services.AddAdminAuthorization();
@@ -54,6 +82,14 @@ builder.Services.AddAdminAuthorization();
 builder.Services.Configure<PasswordHasherOptions>(o => o.IterationCount = 210_000);
 builder.Services.AddSingleton<PasswordHasher<AdminUser>>();
 builder.Services.AddSingleton<PasswordHasherService>();
+
+// Email/password validation + cookie principal building, backed by an EF lookup.
+// Scoped: EfAdminUserLookup resolves the scoped IDbContextFactory consumer chain and
+// the credential service is only used per sign-in request / per Blazor circuit.
+builder.Services.AddScoped<IAdminUserLookup, EfAdminUserLookup>();
+builder.Services.AddScoped<AdminCredentialService>();
+// Server-side Blazor: revalidate the circuit's principal against the DB every 30 min.
+builder.Services.AddScoped<AuthenticationStateProvider, AdminAuthStateProvider>();
 
 var app = builder.Build();
 
