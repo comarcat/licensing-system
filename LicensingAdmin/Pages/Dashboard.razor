@@ -1,5 +1,7 @@
 @page "/"
 @using Microsoft.EntityFrameworkCore
+@using LicensingAdmin.Auth
+@attribute [Authorize(Policy = AuthPolicies.ViewerAccess)]
 @inject IDbContextFactory<AppDbContext> DbFactory
 
 <MudText Typo="Typo.h4" Class="mb-4">Dashboard</MudText>

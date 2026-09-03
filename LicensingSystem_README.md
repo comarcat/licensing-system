@@ -66,8 +66,10 @@ Approve/Reject that writes back to the database).
 Still open, in roughly the order I'd tackle them:
 - **License generation UI** — the "+ Generate New License" flow from the
   wireframes (create a `SoftwareProduct`, issue a signed key).
-- **Admin authentication** — the Pending Review page currently hardcodes
-  `"support-staff@vendor.com"` as the reviewer; there's no login yet.
+- **Admin authentication** — cookie login is in place (`/Account/Login`),
+  the admin screens require an authenticated admin, and Pending Review now
+  records the reviewer from the signed-in account. Remaining: the first
+  SuperAdmin seeder and the admin-user management screen.
 - **Reports screen** (PDF/XLS export) and **Notification Settings** screen.
 - Wiring `LicensingAdmin` to call `LicensingApi`'s admin endpoints instead
   of (or in addition to) querying the database directly — fine as-is for a
