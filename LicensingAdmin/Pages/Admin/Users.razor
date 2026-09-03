@@ -1,0 +1,181 @@
+@page "/admin/users"
+@using LicensingAdmin.Auth
+@attribute [Authorize(Policy = AuthPolicies.AdminUserAccess)]
+@inject AdminUserService Admins
+@inject AuthenticationStateProvider AuthState
+@inject ISnackbar Snackbar
+@inject ILoggerFactory LoggerFactory
+
+<MudText Typo="Typo.h4" Class="mb-1">Usuarios administradores</MudText>
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+    Alta de administradores con una contraseña temporal y activación/desactivación. Todo
+    cambio queda en el registro de auditoría.
+</MudText>
+
+<MudPaper Class="pa-4 mb-6" Elevation="1" MaxWidth="720px">
+    <MudText Typo="Typo.subtitle1" Class="mb-2">Nuevo administrador</MudText>
+    <MudGrid>
+        <MudItem xs="12" md="6">
+            <MudTextField @bind-Value="_email" Label="Email" Immediate="true"
+                          InputType="InputType.Email" MaxLength="320" />
+        </MudItem>
+        <MudItem xs="12" md="6">
+            <MudSelect T="AdminRole" @bind-Value="_role" Label="Rol">
+                @foreach (var r in Enum.GetValues<AdminRole>())
+                {
+                    <MudSelectItem T="AdminRole" Value="@r">@r</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" md="6">
+            <MudTextField @bind-Value="_tempPassword" Label="Contraseña temporal"
+                          InputType="InputType.Password" Immediate="true" />
+        </MudItem>
+        <MudItem xs="12">
+            <MudButton OnClick="CreateAsync" Variant="Variant.Filled" Color="Color.Primary"
+                       Disabled="@_busy" StartIcon="@Icons.Material.Filled.PersonAdd">
+                @(_busy ? "Creando…" : "Crear administrador")
+            </MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@if (_loading)
+{
+    <MudProgressCircular Indeterminate="true" />
+}
+else
+{
+    <MudSimpleTable Dense="true" Hover="true" Style="max-width:720px">
+        <thead>
+            <tr><th>Email</th><th>Rol</th><th>Alta</th><th>Activo</th></tr>
+        </thead>
+        <tbody>
+            @foreach (var u in _users)
+            {
+                <tr>
+                    <td style="font-family:monospace">@u.Email</td>
+                    <td>@u.Role</td>
+                    <td>@u.CreatedAtUtc.ToString("yyyy-MM-dd")</td>
+                    <td>
+                        <MudSwitch T="bool" Value="@u.IsActive" Color="Color.Primary"
+                                   ValueChanged="@(v => ToggleAsync(u, v))" Disabled="@_busy" />
+                    </td>
+                </tr>
+            }
+            @if (_users.Count == 0)
+            {
+                <tr><td colspan="4"><MudText Typo="Typo.body2" Color="Color.Secondary">Sin administradores todavía.</MudText></td></tr>
+            }
+        </tbody>
+    </MudSimpleTable>
+}
+
+@code {
+    private const int PasswordFloor = 12;
+
+    private ILogger Logger => LoggerFactory.CreateLogger("LicensingAdmin.Pages.Admin.Users");
+
+    private bool _loading = true;
+    private bool _busy;
+    private List<AdminUser> _users = new();
+
+    private string? _email;
+    private AdminRole _role = AdminRole.ReadOnlyViewer;
+    private string? _tempPassword;
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        _users = (await Admins.ListAsync()).ToList();
+        _loading = false;
+    }
+
+    private async Task<string?> ActorOrNullAsync()
+    {
+        var actor = CurrentAdmin.Email((await AuthState.GetAuthenticationStateAsync()).User);
+        if (string.IsNullOrWhiteSpace(actor))
+        {
+            Snackbar.Add("Tu sesión ya no es válida. Vuelve a iniciar sesión.", Severity.Error);
+            return null;
+        }
+        return actor;
+    }
+
+    private async Task CreateAsync()
+    {
+        if (_busy) return;
+
+        var actor = await ActorOrNullAsync();
+        if (actor is null) return;
+
+        if (string.IsNullOrWhiteSpace(_email) || string.IsNullOrWhiteSpace(_tempPassword))
+        {
+            Snackbar.Add("Email y contraseña temporal son obligatorios.", Severity.Warning);
+            return;
+        }
+        if (_tempPassword.Length < PasswordFloor)
+        {
+            Snackbar.Add($"La contraseña temporal debe tener al menos {PasswordFloor} caracteres.", Severity.Warning);
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var created = await Admins.CreateAsync(_email, _role, _tempPassword, actor);
+            Snackbar.Add($"Administrador {created.Email} creado.", Severity.Success);
+            _email = null;
+            _role = AdminRole.ReadOnlyViewer;
+            await ReloadAsync();
+        }
+        catch (AdminEmailTakenException)
+        {
+            Snackbar.Add("Ya existe un administrador con ese email.", Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            // Type name only — a DbUpdateException message can carry the email; never the full ex.
+            Logger.LogWarning("Admin create failed by {Actor}: {Error}.", actor, ex.GetType().Name);
+            Snackbar.Add("No se pudo crear el administrador. Revisa los datos e inténtalo de nuevo.", Severity.Error);
+        }
+        finally
+        {
+            // Clear the temp password from the circuit on every path, not just success.
+            _tempPassword = null;
+            _busy = false;
+        }
+    }
+
+    private async Task ToggleAsync(AdminUser user, bool isActive)
+    {
+        if (_busy) return;
+
+        var actor = await ActorOrNullAsync();
+        if (actor is null) return;
+
+        _busy = true;
+        try
+        {
+            await Admins.SetActiveAsync(user.Id, isActive, actor);
+            Snackbar.Add($"{user.Email} {(isActive ? "activado" : "desactivado")}.", Severity.Info);
+            await ReloadAsync();
+        }
+        catch (LastSuperAdminException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning("Admin active-toggle failed by {Actor}: {Error}.", actor, ex.GetType().Name);
+            Snackbar.Add("No se pudo actualizar el administrador.", Severity.Error);
+            await ReloadAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}
