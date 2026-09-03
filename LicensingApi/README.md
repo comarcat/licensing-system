@@ -21,10 +21,11 @@ dotnet restore
 
 ## 3. Set your connection string
 
-Edit `appsettings.json` → `ConnectionStrings:LicensingDb`, or override locally with:
+Set `ConnectionStrings:LicensingDb` via user-secrets (leave the empty
+placeholder in `appsettings.json` untouched):
 ```
 dotnet user-secrets init
-dotnet user-secrets set "ConnectionStrings:LicensingDb" "Host=localhost;Port=5432;Database=licensing;Username=licensing_app;Password=..."
+dotnet user-secrets set "ConnectionStrings:LicensingDb" "Host=<host>;Port=5432;Database=licensing_app;Username=<user>;Password=<password>"
 ```
 
 ## 4. Generate the real EF Core migration
