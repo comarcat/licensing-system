@@ -1,0 +1,25 @@
+@page
+@using Microsoft.AspNetCore.Authorization
+@model LicensingAdmin.Pages.Account.LogoutModel
+@attribute [AllowAnonymous]
+@{
+    Layout = null;
+}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cerrar sesión — License Admin</title>
+    <link href="~/css/site.css" rel="stylesheet" />
+</head>
+<body>
+    <main>
+        <h1>Cerrar sesión</h1>
+        <form method="post">
+            @Html.AntiForgeryToken()
+            <button type="submit">Cerrar sesión</button>
+        </form>
+    </main>
+</body>
+</html>

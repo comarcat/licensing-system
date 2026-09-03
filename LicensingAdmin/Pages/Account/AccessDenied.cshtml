@@ -1,0 +1,25 @@
+@page "/Account/AccessDenied"
+@using Microsoft.AspNetCore.Authorization
+@attribute [AllowAnonymous]
+@{
+    Layout = null;
+}
+@* AllowAnonymous and a plain 200 (no redirect): this is the cookie AccessDeniedPath
+   target for an authenticated admin whose role is insufficient. It must not bounce
+   back to /Account/Login, which would loop via returnUrl. *@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sin permiso — License Admin</title>
+    <link href="~/css/site.css" rel="stylesheet" />
+</head>
+<body>
+    <main>
+        <h1>Sin permiso</h1>
+        <p>No tienes permiso para ver esta página. Si crees que es un error, contacta con un administrador.</p>
+        <p><a href="/">Volver al inicio</a></p>
+    </main>
+</body>
+</html>
