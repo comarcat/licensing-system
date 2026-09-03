@@ -13,6 +13,7 @@
 @inject AuthenticationStateProvider AuthState
 @inject ISnackbar Snackbar
 @inject IJSRuntime JS
+@inject ILoggerFactory LoggerFactory
 
 <MudText Typo="Typo.h4" Class="mb-1">Generar nueva licencia</MudText>
 <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
@@ -53,14 +54,17 @@ else
             {
                 <MudItem xs="12" md="8">
                     <MudTextField @bind-Value="_newName" Label="Nombre del producto" Required="true"
-                                  RequiredError="El nombre es obligatorio." Immediate="true" />
+                                  RequiredError="El nombre es obligatorio." Immediate="true"
+                                  MaxLength="@ProductNameMax" Counter="@ProductNameMax" />
                 </MudItem>
                 <MudItem xs="12" md="8">
                     <MudTextField @bind-Value="_newVendor" Label="Fabricante" Required="true"
-                                  RequiredError="El fabricante es obligatorio." Immediate="true" />
+                                  RequiredError="El fabricante es obligatorio." Immediate="true"
+                                  MaxLength="@ProductNameMax" Counter="@ProductNameMax" />
                 </MudItem>
                 <MudItem xs="12" md="8">
-                    <MudTextField @bind-Value="_newVersion" Label="Versión actual (opcional)" Immediate="true" />
+                    <MudTextField @bind-Value="_newVersion" Label="Versión actual (opcional)" Immediate="true"
+                                  MaxLength="@ProductVersionMax" Counter="@ProductVersionMax" />
                 </MudItem>
             }
             else
@@ -99,10 +103,12 @@ else
             </MudItem>
 
             <MudItem xs="12" md="8">
-                <MudTextField @bind-Value="_customerEmail" Label="Email del cliente (opcional)" Immediate="true" />
+                <MudTextField @bind-Value="_customerEmail" Label="Email del cliente (opcional)" Immediate="true"
+                              InputType="InputType.Email" MaxLength="@CustomerEmailMax" Counter="@CustomerEmailMax" />
             </MudItem>
             <MudItem xs="12" md="8">
-                <MudTextField @bind-Value="_customerName" Label="Nombre del cliente (opcional)" Immediate="true" />
+                <MudTextField @bind-Value="_customerName" Label="Nombre del cliente (opcional)" Immediate="true"
+                              MaxLength="@CustomerNameMax" Counter="@CustomerNameMax" />
             </MudItem>
 
             <MudItem xs="12" md="8">
@@ -116,6 +122,17 @@ else
 }
 
 @code {
+    // Aligned with AppDbContext HasMaxLength(...) — reject over-long input here so a
+    // stray value from the circuit surfaces as a form warning, not a Postgres 22001.
+    private const int CustomerEmailMax = 320;
+    private const int CustomerNameMax = 200;
+    private const int ProductNameMax = 200;
+    private const int ProductVersionMax = 50;
+    // Business ceiling on a single issued key; the signer takes whatever it is handed.
+    private const int MaxActivationsCeiling = 10_000;
+
+    private ILogger Logger => LoggerFactory.CreateLogger("LicensingAdmin.Pages.Licenses.New");
+
     private MudForm _form = default!;
 
     private bool _loading = true;
@@ -182,16 +199,48 @@ else
             return;
         }
 
-        if (BuildModel() == LicenseModel.None)
+        var model = BuildModel();
+        if (model == LicenseModel.None)
         {
             Snackbar.Add("Selecciona al menos un modelo de licencia.", Severity.Warning);
             return;
         }
 
+        // Min="1" on the numeric field is a client-only hint; re-check here so a value
+        // pushed straight through the circuit can't get a 0 / negative / huge count
+        // signed verbatim by LicenseIssuanceService (E2-T5 B-5 → E2-T6 criterion).
+        if (_maxActivations < 1 || _maxActivations > MaxActivationsCeiling)
+        {
+            Snackbar.Add($"El máximo de activaciones debe estar entre 1 y {MaxActivationsCeiling}.", Severity.Warning);
+            return;
+        }
+
+        // Same for length: MaxLength on the fields is advisory (E2-T5 B-4 → E2-T6).
+        if (Longer(_customerEmail, CustomerEmailMax) || Longer(_customerName, CustomerNameMax)
+            || Longer(_newName, ProductNameMax) || Longer(_newVendor, ProductNameMax)
+            || Longer(_newVersion, ProductVersionMax))
+        {
+            Snackbar.Add("Algún campo excede la longitud permitida.", Severity.Warning);
+            return;
+        }
+
+        DateTime? expiryUtc = null;
+        if (model.HasFlag(LicenseModel.Subscription) && _expiry is { } picked)
+        {
+            // MudDatePicker yields DateTimeKind.Unspecified midnight-local; pin it to UTC
+            // rather than let ToUniversalTime() shift it by the server offset.
+            var expiryDate = DateTime.SpecifyKind(picked.Date, DateTimeKind.Utc);
+            if (expiryDate < DateTime.UtcNow.Date)
+            {
+                Snackbar.Add("El vencimiento de la suscripción no puede estar en el pasado.", Severity.Warning);
+                return;
+            }
+            expiryUtc = expiryDate;
+        }
+
         _submitting = true;
         try
         {
-            var model = BuildModel();
             var request = new LicenseIssuanceRequest
             {
                 ExistingProductId = _newProduct ? null : _existingProductId,
@@ -200,9 +249,7 @@ else
                 NewProductVersion = string.IsNullOrWhiteSpace(_newVersion) ? null : _newVersion!.Trim(),
                 Model = model,
                 MaxActivations = _maxActivations,
-                SubscriptionExpiryUtc = model.HasFlag(LicenseModel.Subscription)
-                    ? _expiry?.ToUniversalTime()
-                    : null,
+                SubscriptionExpiryUtc = expiryUtc,
                 CustomerEmail = string.IsNullOrWhiteSpace(_customerEmail) ? null : _customerEmail!.Trim(),
                 CustomerName = string.IsNullOrWhiteSpace(_customerName) ? null : _customerName!.Trim(),
                 IssuedBy = issuedBy,
@@ -213,13 +260,18 @@ else
         }
         catch (Exception ex)
         {
-            Snackbar.Add($"No se pudo emitir la licencia: {ex.Message}", Severity.Error);
+            // Generic to the operator (no raw DB/exception detail in the UI); full detail
+            // to the server log for ops/forensics.
+            Logger.LogWarning(ex, "License issuance failed for actor {Actor}.", issuedBy);
+            Snackbar.Add("No se pudo emitir la licencia. Revisa los datos e inténtalo de nuevo.", Severity.Error);
         }
         finally
         {
             _submitting = false;
         }
     }
+
+    private static bool Longer(string? value, int max) => (value?.Length ?? 0) > max;
 
     private async Task CopyKeyAsync()
     {

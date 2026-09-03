@@ -1,14 +1,14 @@
 using System.Net;
-using System.Security.Claims;
-using System.Text.Encodings.Web;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using Xunit;
+
+// NOTE: StubAuthHandler was moved to TestAuthStub.cs for E2-T6 so that
+// GenerateLicensePipelineTests can share the exact same stub. Behaviour is unchanged;
+// this file just consumes the now-top-level internal type.
 
 namespace LicensingSystem.Tests;
 
@@ -133,49 +133,6 @@ public class GateScreensPipelineTests
                             StubAuthHandler.SchemeName, _ => { });
                 });
             }
-        }
-    }
-
-    /// <summary>
-    /// Minimal stand-in auth handler: if the request carries an <c>X-Stub-Role</c> header
-    /// it authenticates with that role claim (and an optional <c>X-Stub-Name</c>), else it
-    /// returns <see cref="AuthenticateResult.NoResult"/> so the fallback policy still bites.
-    /// </summary>
-    private sealed class StubAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions>
-    {
-        public const string SchemeName = "Stub";
-        public const string RoleHeader = "X-Stub-Role";
-        public const string NameHeader = "X-Stub-Name";
-
-        public StubAuthHandler(
-            IOptionsMonitor<AuthenticationSchemeOptions> options,
-            ILoggerFactory logger,
-            UrlEncoder encoder)
-            : base(options, logger, encoder)
-        {
-        }
-
-        protected override Task<AuthenticateResult> HandleAuthenticateAsync()
-        {
-            if (!Request.Headers.TryGetValue(RoleHeader, out var role) || string.IsNullOrEmpty(role))
-            {
-                return Task.FromResult(AuthenticateResult.NoResult());
-            }
-
-            var name = Request.Headers.TryGetValue(NameHeader, out var n) && !string.IsNullOrEmpty(n)
-                ? n.ToString()
-                : "stub@vendor.test";
-
-            var identity = new ClaimsIdentity(
-                new[]
-                {
-                    new Claim(ClaimTypes.Name, name),
-                    new Claim(ClaimTypes.Role, role.ToString()),
-                },
-                authenticationType: SchemeName);
-
-            var ticket = new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName);
-            return Task.FromResult(AuthenticateResult.Success(ticket));
         }
     }
 }
