@@ -294,6 +294,46 @@ public class LicenseSignerTests
             Encoding.UTF8.GetString(LicenseSigner.CanonicalBytes(local)));
     }
 
+    // Gives the Local branch teeth independent of the host time zone: it compares
+    // the SAME wall-clock reading tagged Local vs. Unspecified. FormatExpiry must
+    // convert Local via ToUniversalTime() (offset applied) but treat Unspecified
+    // as already-UTC (offset NOT applied). On a host whose local offset for the
+    // instant is non-zero the two canonical strings must differ, and the Local
+    // one must equal the true UTC of that wall-clock; on a UTC host (e.g. CI)
+    // both are correctly identical. Either way the Local result is pinned to
+    // ToLocalTime()/ToUniversalTime() semantics, not to the host being non-UTC.
+    [Fact]
+    public void CanonicalBytes_LocalBranch_AppliesOffset_UnlikeUnspecifiedBranch()
+    {
+        var wall = new DateTime(2027, 6, 1, 12, 30, 45); // Kind == Unspecified
+        var hostOffset = TimeZoneInfo.Local.GetUtcOffset(DateTime.SpecifyKind(wall, DateTimeKind.Local));
+
+        var asLocal = NewLicenseWithExpiry();
+        asLocal.SubscriptionExpiryUtc = DateTime.SpecifyKind(wall, DateTimeKind.Local);
+
+        var asUnspecified = NewLicenseWithExpiry();
+        asUnspecified.SubscriptionExpiryUtc = wall;
+
+        var localCanon = Encoding.UTF8.GetString(LicenseSigner.CanonicalBytes(asLocal));
+        var unspecifiedCanon = Encoding.UTF8.GetString(LicenseSigner.CanonicalBytes(asUnspecified));
+
+        // Unspecified is never shifted.
+        Assert.EndsWith("|2027-06-01T12:30:45Z", unspecifiedCanon);
+
+        // Local is the same wall-clock converted to UTC via the host zone.
+        var expectedLocalUtc = DateTime.SpecifyKind(wall, DateTimeKind.Local).ToUniversalTime();
+        Assert.EndsWith("|" + expectedLocalUtc.ToString("yyyy-MM-ddTHH:mm:ss'Z'", CultureInfo.InvariantCulture), localCanon);
+
+        if (hostOffset == TimeSpan.Zero)
+        {
+            Assert.Equal(unspecifiedCanon, localCanon);
+        }
+        else
+        {
+            Assert.NotEqual(unspecifiedCanon, localCanon);
+        }
+    }
+
     // ---------------------------------------------------------------------
     // Acceptance criterion 5 — same instant signed as Unspecified / Utc /
     // Local / truncated-to-seconds => identical signature and Verify == true.
