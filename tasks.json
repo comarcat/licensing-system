@@ -104,7 +104,7 @@
       "LicensingCore/Licensing/LicenseKeyGenerator.cs",
       "LicensingSystem.Tests/LicenseKeyGeneratorTests.cs"
     ],
-    "status": "in_progress"
+    "status": "done"
   },
   {
     "id": "E1-T5",
