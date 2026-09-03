@@ -144,7 +144,14 @@ public class GateScreensPipelineTests
     /// it authenticates with that role claim (and an optional <c>X-Stub-Name</c>), else it
     /// returns <see cref="AuthenticateResult.NoResult"/> so the fallback policy still bites.
     /// </summary>
-    private sealed class StubAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions>
+    /// <remarks>
+    /// E2-T7: widened from <c>private</c> to <c>internal</c> so
+    /// <c>AdminUsersGatePipelineTests</c> can reuse the exact same stub scheme instead of
+    /// duplicating it. (E2-T6 lifts this into a standalone <c>TestAuthStub.cs</c>; on this
+    /// branch, stacked on E2-T3, that file does not exist yet — reusing in place is the
+    /// smaller change and leaves the eventual extraction to the E2-T6 merge.)
+    /// </remarks>
+    internal sealed class StubAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions>
     {
         public const string SchemeName = "Stub";
         public const string RoleHeader = "X-Stub-Role";

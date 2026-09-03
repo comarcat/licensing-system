@@ -126,7 +126,7 @@ else
         {
             var created = await Admins.CreateAsync(_email, _role, _tempPassword, actor);
             Snackbar.Add($"Administrador {created.Email} creado.", Severity.Success);
-            _email = _tempPassword = null;
+            _email = null;
             _role = AdminRole.ReadOnlyViewer;
             await ReloadAsync();
         }
@@ -136,11 +136,14 @@ else
         }
         catch (Exception ex)
         {
-            Logger.LogWarning(ex, "Admin create failed by {Actor}.", actor);
+            // Type name only — a DbUpdateException message can carry the email; never the full ex.
+            Logger.LogWarning("Admin create failed by {Actor}: {Error}.", actor, ex.GetType().Name);
             Snackbar.Add("No se pudo crear el administrador. Revisa los datos e inténtalo de nuevo.", Severity.Error);
         }
         finally
         {
+            // Clear the temp password from the circuit on every path, not just success.
+            _tempPassword = null;
             _busy = false;
         }
     }
@@ -159,9 +162,14 @@ else
             Snackbar.Add($"{user.Email} {(isActive ? "activado" : "desactivado")}.", Severity.Info);
             await ReloadAsync();
         }
+        catch (LastSuperAdminException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+            await ReloadAsync();
+        }
         catch (Exception ex)
         {
-            Logger.LogWarning(ex, "Admin active-toggle failed by {Actor}.", actor);
+            Logger.LogWarning("Admin active-toggle failed by {Actor}: {Error}.", actor, ex.GetType().Name);
             Snackbar.Add("No se pudo actualizar el administrador.", Severity.Error);
             await ReloadAsync();
         }

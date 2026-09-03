@@ -1,6 +1,7 @@
 using LicensingCore.Data;
 using LicensingCore.Entities;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace LicensingAdmin.Auth;
 
@@ -70,7 +71,17 @@ public sealed class EfAdminUserStore(IDbContextFactory<AppDbContext> factory) : 
         await using var db = await factory.CreateDbContextAsync(ct);
         db.AdminUsers.Add(user);
         db.AuditLogEntries.Add(audit);
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException e) when ((e.InnerException as PostgresException)?.SqlState == "23505")
+        {
+            // Lost the race with a concurrent create between EmailExistsAsync and here —
+            // the unique index on admin_users.Email rejected ours. Translate to the domain
+            // exception so the caller shows "email in use", not a raw Postgres message.
+            throw new AdminEmailTakenException(user.Email);
+        }
     }
 
     /// <inheritdoc />

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using LicensingCore.Entities;
 
 namespace LicensingAdmin.Auth;
@@ -10,6 +11,9 @@ namespace LicensingAdmin.Auth;
 /// </summary>
 public sealed class AdminUserService(IAdminUserStore store, PasswordHasherService hasher)
 {
+    /// <summary>Minimum length for a temp password, enforced at this boundary (not just the form).</summary>
+    public const int MinTempPasswordLength = 12;
+
     /// <summary>Trimmed + invariant-lower-cased, matching <c>AdminSeeder</c> and <c>EfAdminUserLookup</c>.</summary>
     public static string NormalizeEmail(string email) => (email ?? string.Empty).Trim().ToLowerInvariant();
 
@@ -28,6 +32,20 @@ public sealed class AdminUserService(IAdminUserStore store, PasswordHasherServic
         ArgumentException.ThrowIfNullOrWhiteSpace(tempPassword);
         ArgumentException.ThrowIfNullOrWhiteSpace(actor);
 
+        // The service is the reusable security boundary — a trivial temp password for a
+        // privileged account must be refused here, not only in the form (auditor MEDIA-3).
+        if (tempPassword.Length < MinTempPasswordLength)
+        {
+            throw new ArgumentException(
+                $"Temp password must be at least {MinTempPasswordLength} characters.", nameof(tempPassword));
+        }
+
+        // Reject an undefined enum value at the write boundary (auditor BAJA-3; E2-T1 B-3).
+        if (!Enum.IsDefined(role))
+        {
+            throw new ArgumentException($"Unknown role '{(int)role}'.", nameof(role));
+        }
+
         var normalized = NormalizeEmail(email);
         if (await store.EmailExistsAsync(normalized, ct))
         {
@@ -43,7 +61,9 @@ public sealed class AdminUserService(IAdminUserStore store, PasswordHasherServic
             IsActive = true,
         };
 
-        await store.AddAsync(user, Audit(actor, user.Id, "Created"), ct);
+        var audit = Audit(actor, user.Id, "Created");
+        audit.DetailsJson = JsonSerializer.Serialize(new { role = role.ToString() });
+        await store.AddAsync(user, audit, ct);
         return user;
     }
 
@@ -54,6 +74,7 @@ public sealed class AdminUserService(IAdminUserStore store, PasswordHasherServic
     /// </summary>
     /// <exception cref="ArgumentException"><paramref name="actor"/> is null/blank.</exception>
     /// <exception cref="InvalidOperationException">No admin with <paramref name="id"/>.</exception>
+    /// <exception cref="LastSuperAdminException">Deactivating this admin would leave no active SuperAdmin, or it is the actor deactivating themselves.</exception>
     public async Task<AdminUser> SetActiveAsync(
         Guid id, bool isActive, string actor, CancellationToken ct = default)
     {
@@ -67,8 +88,30 @@ public sealed class AdminUserService(IAdminUserStore store, PasswordHasherServic
             return user;
         }
 
+        // Lockout guards (auditor MEDIA-2): never let the panel end up with no way in.
+        if (!isActive)
+        {
+            if (string.Equals(actor, user.Email, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new LastSuperAdminException("An admin cannot deactivate their own account.");
+            }
+
+            if (user.Role == AdminRole.SuperAdmin)
+            {
+                var otherActiveSuperAdmins = (await store.ListAsync(ct))
+                    .Count(u => u.Id != id && u.Role == AdminRole.SuperAdmin && u.IsActive);
+                if (otherActiveSuperAdmins == 0)
+                {
+                    throw new LastSuperAdminException(
+                        "Cannot deactivate the last active SuperAdmin — the panel would be unreachable.");
+                }
+            }
+        }
+
         user.IsActive = isActive;
-        await store.SetActiveAsync(user, Audit(actor, user.Id, "Updated"), ct);
+        var audit = Audit(actor, user.Id, "Updated");
+        audit.DetailsJson = JsonSerializer.Serialize(new { isActive });
+        await store.SetActiveAsync(user, audit, ct);
         return user;
     }
 
@@ -87,8 +130,14 @@ public sealed class AdminUserService(IAdminUserStore store, PasswordHasherServic
 
 /// <summary>Thrown by <see cref="AdminUserService.CreateAsync"/> when the email is already in use.</summary>
 public sealed class AdminEmailTakenException(string normalizedEmail)
-    : InvalidOperationException($"An admin with email '{normalizedEmail}' already exists.")
+    : InvalidOperationException("An admin with that email already exists.")
 {
-    /// <summary>The normalised email that collided.</summary>
+    /// <summary>The normalised email that collided (kept off the message so it stays out of logs).</summary>
     public string NormalizedEmail { get; } = normalizedEmail;
 }
+
+/// <summary>
+/// Thrown by <see cref="AdminUserService.SetActiveAsync"/> when a deactivation would lock the
+/// panel out — the last active SuperAdmin, or the actor deactivating their own account.
+/// </summary>
+public sealed class LastSuperAdminException(string message) : InvalidOperationException(message);
