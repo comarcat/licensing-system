@@ -1,7 +1,10 @@
 @page "/pending-review"
 @using Microsoft.EntityFrameworkCore
+@using LicensingAdmin.Auth
+@attribute [Authorize(Policy = AuthPolicies.ReviewAccess)]
 @inject IDbContextFactory<AppDbContext> DbFactory
 @inject ISnackbar Snackbar
+@inject AuthenticationStateProvider AuthState
 
 <MudText Typo="Typo.h4" Class="mb-1">Pending Review</MudText>
 <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
@@ -73,6 +76,8 @@ else
 
     private async Task Resolve(Activation activation, bool approve)
     {
+        var reviewer = CurrentAdmin.Email((await AuthState.GetAuthenticationStateAsync()).User);
+
         await using var db = await DbFactory.CreateDbContextAsync();
         var entity = await db.Activations.FirstOrDefaultAsync(a => a.Id == activation.Id);
         if (entity is null) return;
@@ -80,7 +85,7 @@ else
         entity.Status = approve ? ActivationStatus.Approved : ActivationStatus.Rejected;
         entity.ReviewDeadlineUtc = null;
         if (approve) entity.ApprovedAtUtc = DateTime.UtcNow; else entity.RejectedAtUtc = DateTime.UtcNow;
-        entity.ReviewedBy = "support-staff@vendor.com"; // TODO: pull from authenticated admin user once auth is added
+        entity.ReviewedBy = reviewer;
 
         db.AuditLogEntries.Add(new AuditLogEntry
         {
