@@ -1,4 +1,5 @@
 using LicensingAdmin.Auth;
+using LicensingAdmin.Licensing;
 using LicensingCore.Configuration;
 using LicensingCore.Data;
 using LicensingCore.Entities;
@@ -90,6 +91,11 @@ builder.Services.AddScoped<IAdminUserLookup, EfAdminUserLookup>();
 builder.Services.AddScoped<AdminCredentialService>();
 // Server-side Blazor: revalidate the circuit's principal against the DB every 30 min.
 builder.Services.AddScoped<AuthenticationStateProvider, AdminAuthStateProvider>();
+
+// License issuance (E2-T5): the /licenses/new screen resolves LicenseIssuanceService,
+// which needs the EF-backed store. Scoped — one short-lived context per issuance.
+builder.Services.AddScoped<ILicenseStore, EfLicenseStore>();
+builder.Services.AddScoped<LicenseIssuanceService>();
 
 var app = builder.Build();
 
