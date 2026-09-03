@@ -1,11 +1,19 @@
 using LicensingAdmin.Auth;
+using LicensingCore.Entities;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace LicensingSystem.Tests;
 
 public class PasswordHasherServiceTests
 {
-    private readonly PasswordHasherService _svc = new();
+    // E1-T7 M-1(a): the service takes an injected PasswordHasher<AdminUser>; in DI that
+    // instance is built from IOptions<PasswordHasherOptions> so LicensingAdmin (step 8)
+    // sets the iteration count. Tests build it explicitly.
+    private static PasswordHasherService NewService() => new(new PasswordHasher<AdminUser>());
+
+    private readonly PasswordHasherService _svc = NewService();
 
     [Fact]
     public void Hash_ThenVerify_WithSamePassword_ReturnsTrue()
@@ -60,9 +68,9 @@ public class PasswordHasherServiceTests
     }
 
     // ---------------------------------------------------------------------
-    // E1-T7 tester additions: gaps around the 5 acceptance criteria.
-    // Budget: PBKDF2 (100k iters) is ~tens of ms/call; each test keeps to
-    // 2-4 crypto calls. No loops of thousands of hashes.
+    // E1-T7 tester additions: gaps around the acceptance criteria.
+    // Budget: PBKDF2 is ~tens of ms/call; each test keeps to 2-4 crypto
+    // calls. No loops of thousands of hashes.
     // ---------------------------------------------------------------------
 
     // Criterion 1 (round-trip) — boundary: the empty password must still
@@ -170,26 +178,60 @@ public class PasswordHasherServiceTests
         Assert.False(_svc.Verify("   \t  ", "x"));
     }
 
-    // Documentation of REAL behavior for null arguments. The service only
-    // contracts to swallow FormatException; null is a caller contract
-    // violation (parameters are non-nullable) and surfaces as
-    // ArgumentNullException. Recorded here so a future change is a conscious
-    // decision, not an accident. Not treated as an E1-T7 gap.
+    // Criterion 4 (E1-T7 CAMBIOS / M-2): a null or empty hash, and a null
+    // password, make Verify return false — it must NOT throw. Hash() is
+    // unchanged and still rejects null (see Hash_WithNullPassword_... below).
+    [Fact]
+    public void Verify_WithNullHash_ReturnsFalse()
+    {
+        var ex = Record.Exception(() => _svc.Verify(null!, "x"));
+
+        Assert.Null(ex);
+        Assert.False(_svc.Verify(null!, "x"));
+    }
+
+    [Fact]
+    public void Verify_WithEmptyHash_ReturnsFalse()
+    {
+        Assert.False(_svc.Verify("", "x"));
+    }
+
+    [Fact]
+    public void Verify_WithNullPassword_ReturnsFalse()
+    {
+        var hash = _svc.Hash("real");
+        var ex = Record.Exception(() => _svc.Verify(hash, null!));
+
+        Assert.Null(ex);
+        Assert.False(_svc.Verify(hash, null!));
+    }
+
     [Fact]
     public void Hash_WithNullPassword_ThrowsArgumentNullException()
     {
         Assert.Throws<ArgumentNullException>(() => _svc.Hash(null!));
     }
 
+    // E1-T7 M-1(a): the hasher is injected, so LicensingAdmin can raise the
+    // PBKDF2 iteration count. A service built around a hasher configured with
+    // IterationCount = 210_000 (OWASP 2024 for PBKDF2-HMAC-SHA512) still
+    // round-trips.
     [Fact]
-    public void Verify_WithNullHash_ThrowsArgumentNullException()
+    public void Constructor_UsesInjectedHasher_WithConfiguredIterationCount()
     {
-        Assert.Throws<ArgumentNullException>(() => _svc.Verify(null!, "x"));
+        var opts = Options.Create(new PasswordHasherOptions { IterationCount = 210_000 });
+        var svc = new PasswordHasherService(new PasswordHasher<AdminUser>(opts));
+
+        var hash = svc.Hash("owasp-2024");
+
+        Assert.False(string.IsNullOrWhiteSpace(hash));
+        Assert.True(svc.Verify(hash, "owasp-2024"));
+        Assert.False(svc.Verify(hash, "owasp-2023"));
     }
 
     [Fact]
-    public void Verify_WithNullPassword_ThrowsArgumentNullException()
+    public void Constructor_WithNullHasher_Throws()
     {
-        Assert.Throws<ArgumentNullException>(() => _svc.Verify("AAAA", null!));
+        Assert.Throws<ArgumentNullException>(() => new PasswordHasherService(null!));
     }
 }
