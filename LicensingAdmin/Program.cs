@@ -1,3 +1,4 @@
+using LicensingAdmin.Auth;
 using LicensingCore.Configuration;
 using LicensingCore.Data;
 using Microsoft.EntityFrameworkCore;
@@ -19,6 +20,10 @@ builder.Services.AddMudServices();
 var licensingDb = ConnectionStringGuard.Require(builder.Configuration.GetConnectionString("LicensingDb"));
 builder.Services.AddDbContextFactory<AppDbContext>(options =>
     options.UseNpgsql(licensingDb));
+
+// Registers ILicenseSigner (singleton). Uses Crypto:RsaPrivateKeyPem when set,
+// otherwise a dev-only in-memory RSA key (logs one warning). See CryptoRegistration.
+builder.Services.AddLicenseSigner(builder.Configuration, builder.Environment);
 
 var app = builder.Build();
 
