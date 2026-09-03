@@ -1,0 +1,304 @@
+@page "/licenses/new"
+@* Explicit namespace: the folder Pages/Licenses/ would otherwise derive
+   LicensingAdmin.Pages.Licenses, which collides with the existing Pages/Licenses.razor
+   list component (a type of that same name). Routing is unaffected by the namespace. *@
+@namespace LicensingAdmin.Pages.NewLicense
+@using System.Linq
+@using LicensingAdmin.Auth
+@using LicensingAdmin.Licensing
+@using Microsoft.EntityFrameworkCore
+@attribute [Authorize(Policy = AuthPolicies.IssueAccess)]
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject LicenseIssuanceService Issuance
+@inject AuthenticationStateProvider AuthState
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
+@inject ILoggerFactory LoggerFactory
+
+<MudText Typo="Typo.h4" Class="mb-1">Generar nueva licencia</MudText>
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+    Crea el producto (o reutiliza uno) y emite una clave firmada. Los campos del modelo y el
+    tope de activaciones quedan congelados en la clave en el momento de la emisión.
+</MudText>
+
+@if (_loading)
+{
+    <MudProgressCircular Indeterminate="true" />
+}
+else if (_issued is not null)
+{
+    <MudPaper Class="pa-6" Elevation="2" MaxWidth="640px">
+        <MudText Typo="Typo.subtitle1" Color="Color.Success" Class="mb-2">Licencia emitida</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-1">Clave</MudText>
+        <div class="d-flex align-center ga-2 mb-4">
+            <MudText Typo="Typo.h6" Style="font-family:monospace;letter-spacing:1px">@_issued.LicenseKey</MudText>
+            <MudIconButton Icon="@Icons.Material.Filled.ContentCopy" Size="Size.Small"
+                           aria-label="Copiar" OnClick="CopyKeyAsync" />
+        </div>
+        <MudButton Href="/licenses" Variant="Variant.Filled" Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.ArrowBack">
+            Volver a Licencias
+        </MudButton>
+        <MudButton OnClick="ResetForm" Variant="Variant.Text" Class="ml-2">Emitir otra</MudButton>
+    </MudPaper>
+}
+else
+{
+    <MudForm @ref="_form">
+        <MudGrid>
+            <MudItem xs="12" md="8">
+                <MudSwitch @bind-Value="_newProduct" Label="Nuevo producto" Color="Color.Primary" />
+            </MudItem>
+
+            @if (_newProduct)
+            {
+                <MudItem xs="12" md="8">
+                    <MudTextField @bind-Value="_newName" Label="Nombre del producto" Required="true"
+                                  RequiredError="El nombre es obligatorio." Immediate="true"
+                                  MaxLength="@ProductNameMax" Counter="@ProductNameMax" />
+                </MudItem>
+                <MudItem xs="12" md="8">
+                    <MudTextField @bind-Value="_newVendor" Label="Fabricante" Required="true"
+                                  RequiredError="El fabricante es obligatorio." Immediate="true"
+                                  MaxLength="@ProductNameMax" Counter="@ProductNameMax" />
+                </MudItem>
+                <MudItem xs="12" md="8">
+                    <MudTextField @bind-Value="_newVersion" Label="Versión actual (opcional)" Immediate="true"
+                                  MaxLength="@ProductVersionMax" Counter="@ProductVersionMax" />
+                </MudItem>
+            }
+            else
+            {
+                <MudItem xs="12" md="8">
+                    <MudSelect T="Guid" @bind-Value="_existingProductId" Label="Producto"
+                               Required="true" RequiredError="Elige un producto.">
+                        @foreach (var p in _products)
+                        {
+                            <MudSelectItem T="Guid" Value="@p.Id">@p.Name — @p.Vendor</MudSelectItem>
+                        }
+                    </MudSelect>
+                    @if (_products.Count == 0)
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">
+                            No hay productos todavía — activa "Nuevo producto".
+                        </MudText>
+                    }
+                </MudItem>
+            }
+
+            <MudItem xs="12" md="8">
+                <MudText Typo="Typo.subtitle2" Class="mt-2">Modelo de licencia</MudText>
+                <MudCheckBox @bind-Value="_machine" Label="Machine" Dense="true" />
+                <MudCheckBox @bind-Value="_user" Label="User" Dense="true" />
+                <MudCheckBox @bind-Value="_floating" Label="Floating" Dense="true" />
+                <MudCheckBox @bind-Value="_subscription" Label="Subscription" Dense="true" />
+            </MudItem>
+
+            <MudItem xs="12" md="4">
+                <MudNumericField @bind-Value="_maxActivations" Label="Máx. activaciones" Min="1" />
+            </MudItem>
+            <MudItem xs="12" md="4">
+                <MudDatePicker @bind-Date="_expiry" Label="Vencimiento de suscripción"
+                               Disabled="@(!_subscription)" />
+            </MudItem>
+
+            <MudItem xs="12" md="8">
+                <MudTextField @bind-Value="_customerEmail" Label="Email del cliente (opcional)" Immediate="true"
+                              InputType="InputType.Email" MaxLength="@CustomerEmailMax" Counter="@CustomerEmailMax" />
+            </MudItem>
+            <MudItem xs="12" md="8">
+                <MudTextField @bind-Value="_customerName" Label="Nombre del cliente (opcional)" Immediate="true"
+                              MaxLength="@CustomerNameMax" Counter="@CustomerNameMax" />
+            </MudItem>
+
+            <MudItem xs="12" md="8">
+                <MudButton OnClick="SubmitAsync" Variant="Variant.Filled" Color="Color.Primary"
+                           Disabled="@_submitting" StartIcon="@Icons.Material.Filled.VpnKey">
+                    @(_submitting ? "Emitiendo…" : "Emitir licencia")
+                </MudButton>
+            </MudItem>
+        </MudGrid>
+    </MudForm>
+}
+
+@code {
+    // Aligned with AppDbContext HasMaxLength(...) — reject over-long input here so a
+    // stray value from the circuit surfaces as a form warning, not a Postgres 22001.
+    private const int CustomerEmailMax = 320;
+    private const int CustomerNameMax = 200;
+    private const int ProductNameMax = 200;
+    private const int ProductVersionMax = 50;
+    // Business ceiling on a single issued key; the signer takes whatever it is handed.
+    private const int MaxActivationsCeiling = 10_000;
+
+    private ILogger Logger => LoggerFactory.CreateLogger("LicensingAdmin.Pages.Licenses.New");
+
+    private MudForm _form = default!;
+
+    private bool _loading = true;
+    private bool _submitting;
+    private List<SoftwareProduct> _products = new();
+    private License? _issued;
+
+    private bool _newProduct;
+    private string? _newName;
+    private string? _newVendor;
+    private string? _newVersion;
+    private Guid _existingProductId;
+
+    private bool _machine = true;
+    private bool _user;
+    private bool _floating;
+    private bool _subscription;
+
+    private int _maxActivations = 5;
+    private DateTime? _expiry;
+    private string? _customerEmail;
+    private string? _customerName;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _products = await db.SoftwareProducts.OrderBy(p => p.Name).ToListAsync();
+        _loading = false;
+    }
+
+    private LicenseModel BuildModel()
+    {
+        var m = LicenseModel.None;
+        if (_machine) m |= LicenseModel.Machine;
+        if (_user) m |= LicenseModel.User;
+        if (_floating) m |= LicenseModel.Floating;
+        if (_subscription) m |= LicenseModel.Subscription;
+        return m;
+    }
+
+    private async Task SubmitAsync()
+    {
+        if (_submitting) return;
+
+        var user = (await AuthState.GetAuthenticationStateAsync()).User;
+        var issuedBy = CurrentAdmin.Email(user);
+        if (string.IsNullOrWhiteSpace(issuedBy))
+        {
+            Snackbar.Add("Tu sesión ya no es válida. Vuelve a iniciar sesión.", Severity.Error);
+            return;
+        }
+
+        if (_newProduct)
+        {
+            if (string.IsNullOrWhiteSpace(_newName) || string.IsNullOrWhiteSpace(_newVendor))
+            {
+                Snackbar.Add("Nombre y fabricante del producto son obligatorios.", Severity.Warning);
+                return;
+            }
+        }
+        else if (_existingProductId == Guid.Empty)
+        {
+            Snackbar.Add("Elige un producto o activa \"Nuevo producto\".", Severity.Warning);
+            return;
+        }
+
+        var model = BuildModel();
+        if (model == LicenseModel.None)
+        {
+            Snackbar.Add("Selecciona al menos un modelo de licencia.", Severity.Warning);
+            return;
+        }
+
+        // Min="1" on the numeric field is a client-only hint; re-check here so a value
+        // pushed straight through the circuit can't get a 0 / negative / huge count
+        // signed verbatim by LicenseIssuanceService (E2-T5 B-5 → E2-T6 criterion).
+        if (_maxActivations < 1 || _maxActivations > MaxActivationsCeiling)
+        {
+            Snackbar.Add($"El máximo de activaciones debe estar entre 1 y {MaxActivationsCeiling}.", Severity.Warning);
+            return;
+        }
+
+        // Same for length: MaxLength on the fields is advisory (E2-T5 B-4 → E2-T6).
+        if (Longer(_customerEmail, CustomerEmailMax) || Longer(_customerName, CustomerNameMax)
+            || Longer(_newName, ProductNameMax) || Longer(_newVendor, ProductNameMax)
+            || Longer(_newVersion, ProductVersionMax))
+        {
+            Snackbar.Add("Algún campo excede la longitud permitida.", Severity.Warning);
+            return;
+        }
+
+        DateTime? expiryUtc = null;
+        if (model.HasFlag(LicenseModel.Subscription) && _expiry is { } picked)
+        {
+            // MudDatePicker yields DateTimeKind.Unspecified midnight-local; pin it to UTC
+            // rather than let ToUniversalTime() shift it by the server offset.
+            var expiryDate = DateTime.SpecifyKind(picked.Date, DateTimeKind.Utc);
+            if (expiryDate < DateTime.UtcNow.Date)
+            {
+                Snackbar.Add("El vencimiento de la suscripción no puede estar en el pasado.", Severity.Warning);
+                return;
+            }
+            expiryUtc = expiryDate;
+        }
+
+        _submitting = true;
+        try
+        {
+            var request = new LicenseIssuanceRequest
+            {
+                ExistingProductId = _newProduct ? null : _existingProductId,
+                NewProductName = _newProduct ? _newName!.Trim() : null,
+                NewProductVendor = _newProduct ? _newVendor!.Trim() : null,
+                NewProductVersion = string.IsNullOrWhiteSpace(_newVersion) ? null : _newVersion!.Trim(),
+                Model = model,
+                MaxActivations = _maxActivations,
+                SubscriptionExpiryUtc = expiryUtc,
+                CustomerEmail = string.IsNullOrWhiteSpace(_customerEmail) ? null : _customerEmail!.Trim(),
+                CustomerName = string.IsNullOrWhiteSpace(_customerName) ? null : _customerName!.Trim(),
+                IssuedBy = issuedBy,
+            };
+
+            _issued = await Issuance.IssueAsync(request);
+            Snackbar.Add("Licencia emitida.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            // Generic to the operator (no raw DB/exception detail in the UI); full detail
+            // to the server log for ops/forensics.
+            Logger.LogWarning(ex, "License issuance failed for actor {Actor}.", issuedBy);
+            Snackbar.Add("No se pudo emitir la licencia. Revisa los datos e inténtalo de nuevo.", Severity.Error);
+        }
+        finally
+        {
+            _submitting = false;
+        }
+    }
+
+    private static bool Longer(string? value, int max) => (value?.Length ?? 0) > max;
+
+    private async Task CopyKeyAsync()
+    {
+        if (_issued is null) return;
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", _issued.LicenseKey);
+            Snackbar.Add("Clave copiada.", Severity.Info);
+        }
+        catch
+        {
+            Snackbar.Add("No se pudo copiar automáticamente; cópiala a mano.", Severity.Warning);
+        }
+    }
+
+    private async Task ResetForm()
+    {
+        _issued = null;
+        _newProduct = false;
+        _newName = _newVendor = _newVersion = null;
+        _existingProductId = Guid.Empty;
+        _machine = true;
+        _user = _floating = _subscription = false;
+        _maxActivations = 5;
+        _expiry = null;
+        _customerEmail = _customerName = null;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _products = await db.SoftwareProducts.OrderBy(p => p.Name).ToListAsync();
+    }
+}

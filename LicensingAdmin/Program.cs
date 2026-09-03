@@ -1,4 +1,5 @@
 using LicensingAdmin.Auth;
+using LicensingAdmin.Licensing;
 using LicensingAdmin.Startup;
 using LicensingCore.Configuration;
 using LicensingCore.Data;
@@ -94,6 +95,11 @@ builder.Services.AddScoped<IAdminUserStore, EfAdminUserStore>();
 builder.Services.AddScoped<AdminUserService>();
 // Server-side Blazor: revalidate the circuit's principal against the DB every 30 min.
 builder.Services.AddScoped<AuthenticationStateProvider, AdminAuthStateProvider>();
+
+// License issuance (E2-T5): the /licenses/new screen resolves LicenseIssuanceService,
+// which needs the EF-backed store. Scoped — one short-lived context per issuance.
+builder.Services.AddScoped<ILicenseStore, EfLicenseStore>();
+builder.Services.AddScoped<LicenseIssuanceService>();
 
 // Seeds the first SuperAdmin on startup from Admin:BootstrapEmail / Admin:BootstrapPassword
 // when admin_users is empty; a no-op once a real admin exists or the config is absent.

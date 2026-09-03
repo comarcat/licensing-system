@@ -23,7 +23,7 @@ namespace LicensingSystem.Tests;
 ///     <c>App.razor</c>, NOT a 302 and NOT the create form. The policy really gates:
 ///     only a <c>SuperAdmin</c> gets through.
 ///
-/// Reuse note: this file reuses <c>GateScreensPipelineTests.StubAuthHandler</c> (widened
+/// Reuse note: this file reuses <c>StubAuthHandler</c> (widened
 /// from <c>private</c> to <c>internal</c> on this branch) rather than re-declaring the
 /// scheme or introducing <c>TestAuthStub.cs</c> — E2-T6 does that extraction and this
 /// branch (stacked on E2-T3) should not race it. The factories call
@@ -95,8 +95,8 @@ public class AdminUsersGatePipelineTests
         private HttpClient ClientAs(string role)
         {
             var client = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
-            client.DefaultRequestHeaders.Add(GateScreensPipelineTests.StubAuthHandler.RoleHeader, role);
-            client.DefaultRequestHeaders.Add(GateScreensPipelineTests.StubAuthHandler.NameHeader, "staff@vendor.test");
+            client.DefaultRequestHeaders.Add(StubAuthHandler.RoleHeader, role);
+            client.DefaultRequestHeaders.Add(StubAuthHandler.NameHeader, "staff@vendor.test");
             return client;
         }
 
@@ -137,9 +137,9 @@ public class AdminUsersGatePipelineTests
                 {
                     // ConfigureTestServices runs last, so re-registering AddAuthentication
                     // makes "Stub" the default scheme the FallbackPolicy authenticates against.
-                    services.AddAuthentication(GateScreensPipelineTests.StubAuthHandler.SchemeName)
-                        .AddScheme<AuthenticationSchemeOptions, GateScreensPipelineTests.StubAuthHandler>(
-                            GateScreensPipelineTests.StubAuthHandler.SchemeName, _ => { });
+                    services.AddAuthentication(StubAuthHandler.SchemeName)
+                        .AddScheme<AuthenticationSchemeOptions, StubAuthHandler>(
+                            StubAuthHandler.SchemeName, _ => { });
                 });
             }
         }
