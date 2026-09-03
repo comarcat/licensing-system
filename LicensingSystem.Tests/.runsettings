@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RunSettings>
+  <RunConfiguration>
+    <!-- INFRA #1 backstop: the old VSTestTreatNoTestsAsError MSBuild property is
+         inert with the installed SDK. This TreatNoTestsAsError is the one VSTest
+         honours, so a filter that matches nothing exits non-zero instead of a
+         false green. Every E1-T2 onward verify gate relies on it. -->
+    <TreatNoTestsAsError>true</TreatNoTestsAsError>
+  </RunConfiguration>
+</RunSettings>
