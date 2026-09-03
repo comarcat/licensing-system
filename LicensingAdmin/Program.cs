@@ -89,6 +89,9 @@ builder.Services.AddSingleton<PasswordHasherService>();
 // the credential service is only used per sign-in request / per Blazor circuit.
 builder.Services.AddScoped<IAdminUserLookup, EfAdminUserLookup>();
 builder.Services.AddScoped<AdminCredentialService>();
+// Admin-user management screen (E2-T7): create admins + toggle IsActive, audited.
+builder.Services.AddScoped<IAdminUserStore, EfAdminUserStore>();
+builder.Services.AddScoped<AdminUserService>();
 // Server-side Blazor: revalidate the circuit's principal against the DB every 30 min.
 builder.Services.AddScoped<AuthenticationStateProvider, AdminAuthStateProvider>();
 

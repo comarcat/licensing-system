@@ -407,7 +407,7 @@
       "LicensingAdmin/Auth/IAdminUserStore.cs",
       "LicensingSystem.Tests/AdminUserServiceTests.cs"
     ],
-    "status": "pending"
+    "status": "done"
   },
   {
     "id": "E2-T8",
