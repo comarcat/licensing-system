@@ -379,7 +379,8 @@
     "checkpoint": "step-14-generate-license-page",
     "files": [
       "LicensingAdmin/Pages/Licenses/New.razor",
-      "LicensingAdmin/Shared/MainLayout.razor"
+      "LicensingAdmin/Shared/MainLayout.razor",
+      "LicensingAdmin/Program.cs"
     ],
     "status": "pending"
   },
@@ -406,7 +407,8 @@
       "LicensingAdmin/Pages/Admin/Users.razor",
       "LicensingAdmin/Auth/AdminUserService.cs",
       "LicensingAdmin/Auth/IAdminUserStore.cs",
-      "LicensingSystem.Tests/AdminUserServiceTests.cs"
+      "LicensingSystem.Tests/AdminUserServiceTests.cs",
+      "LicensingAdmin/Program.cs"
     ],
     "status": "pending"
   },

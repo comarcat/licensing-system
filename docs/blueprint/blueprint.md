@@ -2025,17 +2025,28 @@ Del §1 Non-Goals y de los hallazgos diferidos del build, en orden:
     (`OnValidatePrincipal` sólo corre en peticiones HTTP, no en mensajes SignalR) → ventana de
     ≤30 min en la que un admin degradado/desactivado con el circuito abierto puede seguir
     escribiendo. Aceptado como diseño para E2-T4 (`PendingReview.Resolve`, acción recuperable +
-    revocación online), pero **`New.razor::SubmitAsync` emite un artefacto criptográfico
-    irreversible** (licencia RSA-firmada, válida offline; la firma no cubre `IssuedAtUtc`, §20.3
-    #11). Fix real (no `AuthorizeAsync`, que re-lee los mismos claims stale): `IAdminUserLookup.
-    FindByEmailAsync` + comprobar `IsActive` + rol justo antes de `IssueAsync` — aplicar también a
-    `PendingReview.Resolve`. Disparador: **antes de que el panel emita licencias reales**.
+    revocación online), pero afecta a **tres** superficies de write, dos de ellas graves:
+    `New.razor::SubmitAsync` emite un artefacto criptográfico **irreversible** (licencia
+    RSA-firmada, válida offline; la firma no cubre `IssuedAtUtc`, §20.3 #11), y
+    `AdminUserService.CreateAsync` puede **acuñar una cuenta con privilegio** (`SuperAdmin`) que
+    persiste indefinidamente (las guardas `LastSuperAdminException` de E2-T7 limitan el peor caso
+    pero no cierran la acuñación). Fix real (no `AuthorizeAsync`, que re-lee los mismos claims
+    stale): lookup fresco por email + `IsActive` + rol justo antes del write, en las tres —
+    `PendingReview.Resolve`, `New.razor::SubmitAsync`, `AdminUserService.CreateAsync`/`SetActiveAsync`.
+    Disparador: **antes de que el panel emita licencias o gestione admins en producción**.
 14. **Runbook de bootstrap del primer admin.** `Admin:BootstrapEmail` / `Admin:BootstrapPassword`
     (E2-T3): documentar que el password DEBE ser un secreto aleatorio de alta entropía y retirarse
     de la configuración tras el primer arranque (el `LogWarning` del seeder ya lo recuerda); el
     email se persiste como identidad de login del `SuperAdmin` sin validación de formato. `ShouldSeed`
     no impone un suelo de robustez a propósito (rompería su criterio de aceptación 1). Disparador:
     redactar la guía de despliegue del host.
+15. **Rotación forzada de la contraseña temporal del alta de admin** (E2-T7 MEDIA-5). El
+    `AdminUserService.CreateAsync` entrega una contraseña "temporal" (suelo de 12 chars) que hoy
+    **no** obliga a cambiarla en el primer login. Necesita un campo nuevo en `AdminUser`
+    (`MustChangePassword`) → migración EF (Non-Goal del slice, §20.3 #4) + una página de cambio
+    obligatorio que intercepte tras el sign-in. **Aceptado explícitamente como fuera de alcance de
+    E2-T7.** Disparador: el mismo slice que introduzca migraciones EF (§20.4 #4), o antes de dar
+    de alta admins que no sean el operador.
 
 ---
 

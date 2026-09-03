@@ -49,7 +49,7 @@ Solo lo que este epic toca:
 
 ```
 LicensingAdmin/
-  Program.cs                              # EDIT (T1 auth-state, T2 login/logout + `public partial class Program`, T3 seeder)
+  Program.cs                              # EDIT (T1 auth-state, T2 login/logout + `public partial class Program`, T3 seeder, T6 DI de emisión, T7 DI de admin-users)
   Shared/MainLayout.razor                 # EDIT (T6): email+logout + <AuthorizeView> por enlace de nav (Generar licencia + Usuarios admin)
   Auth/
     AdminAuthStateProvider.cs             # NUEVO (T1)
@@ -428,8 +428,9 @@ Staff"); en `MudNavMenu`, **cada** `MudNavLink` envuelto en `<AuthorizeView Poli
 `SuperAdmin`.
 
 **Files**
-- `LicensingAdmin/Pages/Licenses/New.razor` — nuevo
+- `LicensingAdmin/Pages/Licenses/New.razor` — nuevo (`@namespace LicensingAdmin.Pages.NewLicense` explícito — la carpeta `Pages/Licenses/` colisiona con el tipo `Pages/Licenses.razor`, §20.3 #18)
 - `LicensingAdmin/Shared/MainLayout.razor` — edit: email + logout + `<AuthorizeView>` por enlace + enlaces "Generar licencia" y "Usuarios admin"
+- `LicensingAdmin/Program.cs` — edit: `AddScoped<ILicenseStore, EfLicenseStore>()` + `AddScoped<LicenseIssuanceService>()` (el wiring DI de E2-T5 vive aquí)
 
 **Acceptance**
 
@@ -473,8 +474,9 @@ toggle. El enlace de nav a esta pantalla ya lo añadió T6. Test con fake `IAdmi
 **Files**
 - `LicensingAdmin/Pages/Admin/Users.razor` — nuevo
 - `LicensingAdmin/Auth/AdminUserService.cs` — nuevo (puede incluir la impl EF de `IAdminUserStore`)
-- `LicensingAdmin/Auth/IAdminUserStore.cs` — nuevo
+- `LicensingAdmin/Auth/IAdminUserStore.cs` — nuevo (`IAdminUserStore` + `EfAdminUserStore` en el mismo archivo, como `AdminCredentialService.cs`)
 - `LicensingSystem.Tests/AdminUserServiceTests.cs` — nuevo: clase `AdminUserServiceTests`
+- `LicensingAdmin/Program.cs` — edit: `AddScoped<IAdminUserStore, EfAdminUserStore>()` + `AddScoped<AdminUserService>()`
 
 **Acceptance**
 
