@@ -75,7 +75,9 @@ public class GateScreensPipelineTests
         public sealed class Factory : WebApplicationFactory<Program>
         {
             protected override void ConfigureWebHost(IWebHostBuilder builder) =>
-                builder.UseSetting("ConnectionStrings:LicensingDb", FakeConnectionString);
+                builder
+                    .UseSetting("ConnectionStrings:LicensingDb", FakeConnectionString)
+                    .WithoutAdminSeeder();
         }
     }
 
@@ -123,6 +125,7 @@ public class GateScreensPipelineTests
             protected override void ConfigureWebHost(IWebHostBuilder builder)
             {
                 builder.UseSetting("ConnectionStrings:LicensingDb", FakeConnectionString);
+                builder.WithoutAdminSeeder();
                 builder.ConfigureTestServices(services =>
                 {
                     // Re-running AddAuthentication(scheme) re-registers the options setup

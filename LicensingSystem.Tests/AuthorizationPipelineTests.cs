@@ -1,11 +1,26 @@
 using System.Net;
 using System.Text.RegularExpressions;
+using LicensingAdmin.Startup;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace LicensingSystem.Tests;
+
+/// <summary>
+/// Shared helper for every <see cref="WebApplicationFactory{TEntryPoint}"/> in the suite:
+/// drops the <see cref="AdminSeeder"/> hosted service so the test host never touches the
+/// fake connection string at startup (step 11).
+/// </summary>
+internal static class WebHostBuilderTestExtensions
+{
+    public static IWebHostBuilder WithoutAdminSeeder(this IWebHostBuilder builder) =>
+        builder.ConfigureTestServices(services =>
+            services.Remove(services.Single(d => d.ImplementationType == typeof(AdminSeeder))));
+}
 
 /// <summary>
 /// Boots the real <c>LicensingAdmin</c> pipeline with <see cref="WebApplicationFactory{TEntryPoint}"/>
@@ -146,10 +161,11 @@ public class AuthorizationPipelineTests : IClassFixture<AuthorizationPipelineTes
     /// <c>ConnectionStringGuard.Require</c> (which runs in Program.cs, reading
     /// <c>builder.Configuration.GetConnectionString("LicensingDb")</c> before the host is
     /// built) is satisfied. <see cref="IWebHostBuilder.UseSetting"/> writes straight into
-    /// that configuration, so no process-wide environment variable is touched. The host
-    /// never opens a socket: an anonymous request is redirected by the fallback policy
-    /// before any page resolves the <c>DbContextFactory</c>, and <c>db.invalid</c>
-    /// (RFC 6761) is unresolvable anyway.
+    /// that configuration, so no process-wide environment variable is touched.
+    /// <see cref="WebHostBuilderTestExtensions.WithoutAdminSeeder"/> drops the
+    /// <see cref="AdminSeeder"/> hosted service, so the host never opens a socket: an
+    /// anonymous request is redirected by the fallback policy before any page resolves the
+    /// <c>DbContextFactory</c>, and <c>db.invalid</c> (RFC 6761) is unresolvable anyway.
     /// </summary>
     public sealed class PipelineFactory : WebApplicationFactory<Program>
     {
@@ -157,6 +173,8 @@ public class AuthorizationPipelineTests : IClassFixture<AuthorizationPipelineTes
             "Host=db.invalid;Database=test;Username=test;Password=test";
 
         protected override void ConfigureWebHost(IWebHostBuilder builder) =>
-            builder.UseSetting("ConnectionStrings:LicensingDb", FakeConnectionString);
+            builder
+                .UseSetting("ConnectionStrings:LicensingDb", FakeConnectionString)
+                .WithoutAdminSeeder();
     }
 }
