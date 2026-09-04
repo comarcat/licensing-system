@@ -6,7 +6,7 @@ Three projects, tied together by `LicensingSystem.sln`:
 |---|---|---|
 | `LicensingCore` | Class library | `Entities/`, `AppDbContext` — shared by both apps below |
 | `LicensingApi` | ASP.NET Core Web API | `/api/activate`, `/api/checkin` (DLL-facing) |
-| `LicensingAdmin` | Blazor Server + MudBlazor | Admin web front end (Dashboard, Licenses, Pending Review) |
+| `LicensingAdmin` | Blazor Server + MudBlazor | Admin web front end (Dashboard, Licenses, Pending Review x2) |
 
 ## Opening in Visual Studio
 
