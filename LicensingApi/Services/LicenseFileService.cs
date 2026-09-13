@@ -8,11 +8,10 @@ public interface ILicenseFileService
 {
     /// <summary>
     /// Builds the license file the DLL persists locally: an XML document with the
-    /// license/activation/policy state, signed (RSA-SHA256) then AES-GCM encrypted,
-    /// returned as a base64 string ready to embed in the API response or write to disk
-    /// for offline exchange.
+    /// license/activation/policy state, signed (RSA-SHA256), returned as a base64
+    /// string ready to embed in the API response or write to disk for offline exchange.
     /// </summary>
-    string BuildSignedEncryptedFile(LicenseFilePayload payload);
+    string BuildSignedFile(LicenseFilePayload payload);
 }
 
 public class LicenseFilePayload
@@ -33,25 +32,30 @@ public class LicenseFilePayload
 }
 
 /// <summary>
-/// NOTE: this is a pragmatic sign-then-encrypt envelope (RSA-SHA256 detached signature,
-/// AES-256-GCM encryption), not full W3C XMLDSig/XMLEncrypt ceremony. It gives the same
-/// security properties (authenticity + confidentiality) with far less code to maintain.
-/// If you specifically need XMLDSig/XMLEncrypt interop with another system, swap this
-/// implementation for System.Security.Cryptography.Xml — the payload shape (LicenseFilePayload)
-/// and the DLL-side contract (decrypt -> verify signature -> parse) stay the same either way.
+/// Signed-only license file (2026-09-13 — dropped the earlier AES-256-GCM encryption
+/// layer). Nothing in this payload is actually confidential from the customer running
+/// the software: the license key is theirs, the hardware IDs are their own machine's,
+/// the dates aren't sensitive. The property that matters is integrity — a client must
+/// be able to tell the file wasn't tampered with (status flipped to "approved", expiry
+/// pushed out) — and RSA-SHA256 signing gives that completely, verified with the
+/// PUBLIC key, which needs no distribution/secrecy at all. The previous scheme also
+/// required a symmetric AES key on every client, which is a real secret with no clean
+/// way to hand out to an external integrator without a manual, out-of-band step for
+/// every single one — this removes that dependency entirely. If a real confidentiality
+/// requirement ever emerges, the right fix is per-client asymmetric encryption (the
+/// client generates its own keypair and sends the public half at /api/activate), not
+/// reintroducing a shared symmetric secret.
 /// </summary>
 public class LicenseFileService : ILicenseFileService
 {
-    private readonly RSA _signingKey;   // private key: sign here; DLL ships with the public key
-    private readonly byte[] _aesKey;    // 32 bytes; see README for key management guidance
+    private readonly RSA _signingKey; // private key: sign here; the client ships with the public key
 
-    public LicenseFileService(RSA signingKey, byte[] aesKey)
+    public LicenseFileService(RSA signingKey)
     {
         _signingKey = signingKey;
-        _aesKey = aesKey;
     }
 
-    public string BuildSignedEncryptedFile(LicenseFilePayload p)
+    public string BuildSignedFile(LicenseFilePayload p)
     {
         // A plain new XAttribute("xmlns", ns) alongside unqualified element names is not
         // equivalent to actually putting those elements in the namespace — .ToString()
@@ -81,27 +85,10 @@ public class LicenseFileService : ILicenseFileService
 
         var canonicalBytes = Encoding.UTF8.GetBytes(doc.ToString(SaveOptions.DisableFormatting));
 
-        // 1. Sign (RSA-SHA256) over the canonical XML bytes.
         var signature = _signingKey.SignData(canonicalBytes, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         doc.Add(new XElement(ns + "Signature", Convert.ToBase64String(signature)));
 
         var signedBytes = Encoding.UTF8.GetBytes(doc.ToString(SaveOptions.DisableFormatting));
-
-        // 2. Encrypt the signed document (AES-256-GCM).
-        var nonce = RandomNumberGenerator.GetBytes(12);
-        var tag = new byte[16];
-        var cipherText = new byte[signedBytes.Length];
-        using (var aes = new AesGcm(_aesKey, tag.Length))
-        {
-            aes.Encrypt(nonce, signedBytes, cipherText, tag);
-        }
-
-        // Envelope: nonce (12) || tag (16) || ciphertext, base64-encoded.
-        var envelope = new byte[nonce.Length + tag.Length + cipherText.Length];
-        Buffer.BlockCopy(nonce, 0, envelope, 0, nonce.Length);
-        Buffer.BlockCopy(tag, 0, envelope, nonce.Length, tag.Length);
-        Buffer.BlockCopy(cipherText, 0, envelope, nonce.Length + tag.Length, cipherText.Length);
-
-        return Convert.ToBase64String(envelope);
+        return Convert.ToBase64String(signedBytes);
     }
 }

@@ -27,7 +27,7 @@ local testing too. See `infra/README.md`.
 ## 1. Overview
 
 The client tool activates a license key once per machine, then periodically checks in.
-Both operations return a **signed, encrypted license file** the client persists locally
+Both operations return a **signed license file** the client persists locally
 and re-validates offline between check-ins. The server never trusts the client's local
 state — every check-in re-derives the outcome from the database.
 
@@ -200,32 +200,28 @@ avoid a round trip for an obviously malformed key.
 
 ## 5. The license file (`LicenseFileBase64`)
 
-This is what the client tool must decrypt and verify, then trust for offline operation
-between check-ins. It is **not** a JWT and **not** standard XMLDSig/XMLEncrypt — it's a
-deliberately simple sign-then-encrypt envelope (see the comment at the top of
+This is what the client tool must verify, then trust for offline operation between
+check-ins. It is **not** a JWT and **not** standard XMLDSig — it's a deliberately
+simple signed XML document (see the comment at the top of
 `LicensingApi/Services/LicenseFileService.cs` if the server side ever needs to change
 this).
 
-### 5.1 Byte layout (after base64-decoding `LicenseFileBase64`)
+**Changed 2026-09-13**: this file used to be signed *then* AES-256-GCM encrypted,
+which meant every integrator needed a symmetric key handed to them out of band before
+they could do anything with it — a real deployment blocker with no real security
+benefit, since nothing in the payload (license key, hardware IDs, dates) is actually
+confidential from the customer running the software. The encryption layer was
+dropped; the file is signed only now. Integrity (can't be tampered with) is what
+actually matters here, and the RSA signature below gives you that completely, with
+nothing to request or keep secret. If you integrated against the old encrypted format,
+`LicenseFileBase64` is now just the signed XML, base64-encoded — no
+nonce/tag/ciphertext envelope, no AES key.
 
-```
-[ 12 bytes: AES-GCM nonce ] [ 16 bytes: AES-GCM auth tag ] [ N bytes: ciphertext ]
-```
+### 5.1 The signed XML document
 
-### 5.2 Decrypt
-
-- Algorithm: **AES-256-GCM**.
-- Key: the 32-byte AES key configured server-side as `Crypto:AesKeyBase64` — **this key
-  must be shared with the client tool out of band** (it is symmetric, so it cannot be
-  embedded in a way that's safe from extraction from the binary; treat this the same way
-  you'd treat any embedded symmetric secret — obfuscation, not real secrecy, is the best
-  a client-side key can offer). Decrypting `ciphertext` with `nonce`/`tag` yields the
-  **signed XML document** (UTF-8 bytes) described next.
-
-### 5.3 The signed XML document
-
-Once decrypted, you have UTF-8 bytes of XML shaped exactly like this (element order
-matters if you need to reproduce the canonicalization for signature verification):
+Base64-decode `LicenseFileBase64` to get UTF-8 bytes of XML shaped exactly like this
+(element order matters if you need to reproduce the canonicalization for signature
+verification):
 
 ```xml
 <LicenseActivation xmlns="urn:licensing:v1">
@@ -254,10 +250,10 @@ matters if you need to reproduce the canonicalization for signature verification
 when the license has no subscription expiry (perpetual/machine-model licenses).
 Both date fields use .NET's round-trip ("O") format.
 
-### 5.4 Verify the signature
+### 5.2 Verify the signature
 
-1. Take the decrypted XML **exactly as received**, remove the `<Signature>` element,
-   and re-serialize with **no indentation/formatting** (.NET's
+1. Take the XML **exactly as received** (after base64-decoding), remove the
+   `<Signature>` element, and re-serialize with **no indentation/formatting** (.NET's
    `XElement.ToString(SaveOptions.DisableFormatting)` — the signature was computed over
    this exact byte form; any added/removed whitespace, reordered attributes, or changed
    line endings will make verification fail even though the content is "the same").
@@ -268,7 +264,7 @@ Both date fields use .NET's round-trip ("O") format.
 4. If verification fails, treat the license file as tampered — do not honor `Status`,
    `SubscriptionExpiryUtc`, or anything else in it.
 
-### 5.5 Public key (safe to embed in the client — this is the public half only)
+### 5.3 Public key (safe to embed in the client — this is the public half only)
 
 ```
 -----BEGIN PUBLIC KEY-----
@@ -288,11 +284,9 @@ both `LicensingApi` and `LicensingAdmin` — see `team/inbox-arq.md`, 2026-09-13
 key is ever rotated, every `LicenseFileBase64` signed with the old key stops verifying;
 plan a rotation as a coordinated release, not a silent config change.)
 
-**The symmetric AES key is not published in this document** — request it through a
-secure, out-of-band channel (it lives only in the server's `/etc/licensing-api/env`,
-never in git). Unlike the RSA key, this one must stay confidential since it's used for
-both directions (only the server encrypts today, but anyone with the AES key can
-decrypt any license file).
+This is the **only** key material a client tool needs. There is no symmetric key, no
+out-of-band handoff, nothing confidential to request — a new integrator needs only
+this document and the public key above.
 
 ## 6. Business rules the client should anticipate
 
@@ -349,7 +343,7 @@ reactivation of hardware that an admin already approved, never on the first call
   "data": {
     "activationId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
     "status": "pending_review",
-    "licenseFileBase64": "…(base64 envelope, see §5)…",
+    "licenseFileBase64": "…(base64-encoded signed XML, see §5)…",
     "policy": { "checkIntervalHours": 6, "graceDays": 15, "subscriptionGraceDays": 30 },
     "subscriptionExpiryUtc": null,
     "reviewDeadlineUtc": "2026-09-28T12:00:00.0000000Z",
@@ -374,3 +368,5 @@ Resolved since the first version of this document:
   (2026-09-13). The API is no longer plaintext-on-the-wire from a public client's
   point of view. `X-Forwarded-For`/`-Proto` are forwarded correctly through the whole
   chain, confirmed against the rate limiter (§3).
+- The license file's AES-256-GCM encryption layer, which required every integrator to
+  receive a symmetric key out of band (2026-09-13) — dropped; see §5.

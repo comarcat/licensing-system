@@ -3,19 +3,15 @@ using ActivationHelloWorld;
 
 // A minimal Windows console client for LicensingApi — exercises the same contract a
 // real activation DLL would (docs/activation-dll-integration-reference.md): read
-// hardware, POST /api/activate, decrypt+verify the returned license file, then
+// hardware, POST /api/activate, verify the returned license file's signature, then
 // periodically POST /api/checkin. Built to drive end-to-end lifecycle testing (key
 // creation happens in LicensingAdmin; this app covers activate / reactivate /
 // hardware-drift / grace-period / revoke from the client's point of view) rather than
-// as a production integration — a real DLL would harden key storage, retry/backoff,
-// and offline grace UX far more than this does.
+// as a production integration — a real DLL would harden retry/backoff and offline
+// grace UX far more than this does.
 
 var baseUrl = ArgOrEnv(args, "--base-url", "ACTIVATION_BASE_URL") ?? "https://licensing-api.miautrix.tech";
 Console.WriteLine($"LicensingApi base URL: {baseUrl}");
-
-var aesKey = LoadAesKey(args);
-if (aesKey is null)
-    Console.WriteLine("(no AES key configured — activate/checkin will work, but license files won't be decrypted locally; pass --aes-key-file <path> or set ACTIVATION_AES_KEY_BASE64)");
 
 var publicKey = RSA.Create();
 publicKey.ImportFromPem(Keys.LicensingPublicKeyPem);
@@ -53,7 +49,7 @@ void PrintMenu()
 
         1) Activate a license key
         2) Check in (same hardware)
-        3) Show current status (decrypt + verify stored license file)
+        3) Show current status (verify stored license file's signature)
         4) Simulate hardware drift, then check in
         5) Reset local state (new InstallGuid, forget activation)
         0) Exit
@@ -154,13 +150,7 @@ void TryShowLicenseFile(string? base64)
         Console.WriteLine("(no license file to show)");
         return;
     }
-    if (aesKey is null)
-    {
-        Console.WriteLine("(license file present but no AES key configured to decrypt it)");
-        return;
-    }
-
-    var file = LicenseFile.DecryptAndVerify(base64, aesKey, publicKey);
+    var file = LicenseFile.VerifyAndParse(base64, publicKey);
     Console.WriteLine($"  Signature verified: {file.SignatureVerified}");
     Console.WriteLine($"  Status (in file):   {file.Status}");
     Console.WriteLine($"  SubscriptionExpiry: {file.SubscriptionExpiryUtc?.ToString("u") ?? "(perpetual)"}");
@@ -190,14 +180,4 @@ static string? ArgOrEnv(string[] args, string flag, string envVar)
     var idx = Array.IndexOf(args, flag);
     if (idx >= 0 && idx + 1 < args.Length) return args[idx + 1];
     return Environment.GetEnvironmentVariable(envVar);
-}
-
-static byte[]? LoadAesKey(string[] args)
-{
-    var fromFile = ArgOrEnv(args, "--aes-key-file", "__unused__");
-    if (fromFile is not null && File.Exists(fromFile))
-        return Convert.FromBase64String(File.ReadAllText(fromFile).Trim());
-
-    var fromEnv = Environment.GetEnvironmentVariable("ACTIVATION_AES_KEY_BASE64");
-    return fromEnv is null ? null : Convert.FromBase64String(fromEnv.Trim());
 }

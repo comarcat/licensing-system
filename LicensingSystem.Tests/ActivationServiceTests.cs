@@ -37,8 +37,7 @@ public sealed class ActivationServiceTests : IDisposable
         _db.Database.EnsureCreated();
 
         var rsa = RSA.Create(2048);
-        var aesKey = RandomNumberGenerator.GetBytes(32);
-        _service = new ActivationService(_db, new HardwareMatchService(), new LicenseFileService(rsa, aesKey));
+        _service = new ActivationService(_db, new HardwareMatchService(), new LicenseFileService(rsa));
     }
 
     public void Dispose()

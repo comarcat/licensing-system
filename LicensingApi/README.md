@@ -84,13 +84,12 @@ logic, and the pending-review creation path) against this schema.
 Implemented under `Controllers/ActivationController.cs`, backed by
 `Services/ActivationService.cs` (orchestration), `Services/HardwareMatchService.cs`
 (the four-field same-machine rule), and `Services/LicenseFileService.cs` (the
-signed + encrypted license file the DLL persists locally).
+signed license file the DLL persists locally).
 
-### Generating dev crypto keys
+### Generating a dev signing key
 
-The RSA signing key and AES key are read from `Crypto:RsaPrivateKeyPem` /
-`Crypto:AesKeyBase64` in configuration (use `dotnet user-secrets` locally,
-never commit real keys). To generate a dev RSA key pair:
+The RSA signing key is read from `Crypto:RsaPrivateKeyPem` in configuration (use
+`dotnet user-secrets` locally, never commit a real key). To generate a dev key pair:
 
 ```
 openssl genrsa -out dev-private.pem 2048
@@ -98,17 +97,13 @@ openssl rsa -in dev-private.pem -pubout -out dev-public.pem
 ```
 
 Set the contents of `dev-private.pem` as `Crypto:RsaPrivateKeyPem` (server-side
-signing) and ship `dev-public.pem` with the activation DLL for signature
-verification. For the AES key:
+signing) and ship `dev-public.pem` with the activation client for signature
+verification. If unconfigured, `Program.cs` falls back to a randomly generated
+in-memory key so the app still runs locally — but every restart invalidates
+previously issued license files, so this fallback is dev-only and must not be used
+once real activations exist.
 
-```
-openssl rand -base64 32
-```
-
-Set that as `Crypto:AesKeyBase64`. If neither is configured, `Program.cs`
-falls back to a randomly generated in-memory key pair so the app still runs
-locally — but every restart invalidates previously issued license files, so
-this fallback is dev-only and must not be used once real activations exist.
+There is no symmetric key to configure — see below.
 
 ### What's implemented (as of project closure, 2026-09-13)
 
@@ -118,10 +113,13 @@ this fallback is dev-only and must not be used once real activations exist.
   renew), 15-day review-grace-deadline locking, hardware-drift re-review on
   the same row, and a hard `MaxActivationsReached` rejection are all
   implemented and covered by `ActivationServiceTests`/`HardwareMatchServiceTests`.
-- The license file is a pragmatic sign-then-encrypt envelope (RSA-SHA256 +
-  AES-256-GCM), not full W3C XMLDSig/XMLEncrypt — see the comment in
-  `LicenseFileService.cs` for the tradeoff and how to swap it if you need
-  strict XMLDSig/XMLEncrypt interop.
+- The license file is a pragmatic signed XML document (RSA-SHA256), not full W3C
+  XMLDSig — see the comment in `LicenseFileService.cs` for the tradeoff. It was
+  sign-then-encrypt (AES-256-GCM) until 2026-09-13; the encryption layer was dropped
+  because it required every external integrator to receive a symmetric key out of
+  band for no real security benefit (nothing in the payload is actually confidential
+  from the customer running the software) — see
+  `docs/activation-dll-integration-reference.md` §5.
 - Rate limiting is implemented: a 30 req/min fixed window per client IP on
   both endpoints (`Microsoft.AspNetCore.RateLimiting`), returning `429`/
   `RateLimited`.

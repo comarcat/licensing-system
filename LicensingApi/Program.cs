@@ -23,27 +23,25 @@ builder.Services.AddControllers();
 // DEV-ONLY approach: reads key material from configuration. For production,
 // pull the RSA private key from a proper store (Azure Key Vault, a protected
 // PFX on the host, etc.) — never commit real keys to appsettings.json.
+// Note: license files are signed only (no AES encryption) as of 2026-09-13 — see
+// the comment on LicenseFileService for why. There is no symmetric key to configure.
 var rsaPrivateKeyPem = builder.Configuration["Crypto:RsaPrivateKeyPem"];
-var aesKeyBase64 = builder.Configuration["Crypto:AesKeyBase64"];
 
 RSA signingKey;
-byte[] aesKey;
-if (!string.IsNullOrWhiteSpace(rsaPrivateKeyPem) && !string.IsNullOrWhiteSpace(aesKeyBase64))
+if (!string.IsNullOrWhiteSpace(rsaPrivateKeyPem))
 {
     signingKey = RSA.Create();
     signingKey.ImportFromPem(rsaPrivateKeyPem);
-    aesKey = Convert.FromBase64String(aesKeyBase64);
 }
 else
 {
-    // Fallback so the app still runs locally without keys configured yet —
-    // replace with real, persisted keys before any real activation happens.
+    // Fallback so the app still runs locally without a key configured yet —
+    // replace with a real, persisted key before any real activation happens.
     signingKey = RSA.Create(2048);
-    aesKey = RandomNumberGenerator.GetBytes(32);
 }
 
 builder.Services.AddSingleton(signingKey);
-builder.Services.AddSingleton<ILicenseFileService>(new LicenseFileService(signingKey, aesKey));
+builder.Services.AddSingleton<ILicenseFileService>(new LicenseFileService(signingKey));
 builder.Services.AddScoped<IHardwareMatchService, HardwareMatchService>();
 builder.Services.AddScoped<ActivationService>();
 

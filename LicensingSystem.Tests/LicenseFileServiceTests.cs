@@ -6,27 +6,27 @@ using Xunit;
 namespace LicensingSystem.Tests;
 
 /// <summary>
-/// Full round-trip coverage for <see cref="LicenseFileService.BuildSignedEncryptedFile"/>:
-/// build -&gt; decrypt (AES-256-GCM) -&gt; verify (RSA-SHA256/PKCS1) -&gt; parse, exactly what a
-/// real client tool does per docs/activation-dll-integration-reference.md. This did not
-/// exist before 2026-09-13 — the method had zero test coverage, and its very first real
-/// invocation (a live POST /api/activate against production) threw
+/// Full round-trip coverage for <see cref="LicenseFileService.BuildSignedFile"/>:
+/// build -&gt; verify (RSA-SHA256/PKCS1) -&gt; parse, exactly what a real client tool does
+/// per docs/activation-dll-integration-reference.md. This did not exist before
+/// 2026-09-13 — the method had zero test coverage, and its very first real invocation
+/// (a live POST /api/activate against production) threw
 /// <c>System.Xml.XmlException: The prefix '' cannot be redefined from '' to
 /// 'urn:licensing:v1' within the same start element tag.</c> A plain
 /// <c>new XAttribute("xmlns", ns)</c> alongside unqualified element names does not
 /// actually put those elements in the namespace; every element must be built with
 /// <c>XNamespace</c> for <see cref="XElement.ToString(SaveOptions)"/> to succeed at all.
+///
+/// The AES-256-GCM encryption layer this method originally added on top of the
+/// signature was dropped the same day (2026-09-13): none of the payload is actually
+/// confidential from the customer running the software, and requiring every external
+/// integrator to receive a shared symmetric key out of band was a real deployment
+/// blocker for no real security benefit — the RSA signature alone already gives
+/// tamper-evidence, verified with the public key, which needs no secrecy at all.
 /// </summary>
 public class LicenseFileServiceTests
 {
     private static readonly XNamespace Ns = "urn:licensing:v1";
-
-    private static (RSA rsa, byte[] aesKey) NewKeys()
-    {
-        var rsa = RSA.Create(2048);
-        var aesKey = RandomNumberGenerator.GetBytes(32);
-        return (rsa, aesKey);
-    }
 
     private static LicenseFilePayload SamplePayload() => new()
     {
@@ -45,23 +45,13 @@ public class LicenseFileServiceTests
         IssuedAtUtc = new DateTime(2026, 9, 13, 12, 0, 0, DateTimeKind.Utc),
     };
 
-    /// <summary>Decrypt + verify + parse, exactly as documented for the client tool.</summary>
-    private static XElement DecryptVerifyAndParse(string base64Envelope, RSA publicKey, byte[] aesKey)
+    /// <summary>Verify + parse, exactly as documented for the client tool.</summary>
+    private static XElement VerifyAndParse(string base64File, RSA publicKey)
     {
-        var envelope = Convert.FromBase64String(base64Envelope);
-        var nonce = envelope[..12];
-        var tag = envelope[12..28];
-        var cipherText = envelope[28..];
-
-        var plainBytes = new byte[cipherText.Length];
-        using (var aes = new AesGcm(aesKey, tag.Length))
-        {
-            aes.Decrypt(nonce, cipherText, tag, plainBytes);
-        }
-
-        var xml = XElement.Parse(System.Text.Encoding.UTF8.GetString(plainBytes));
+        var signedBytes = Convert.FromBase64String(base64File);
+        var xml = XElement.Parse(System.Text.Encoding.UTF8.GetString(signedBytes));
         var signatureElement = xml.Element(Ns + "Signature")
-            ?? throw new InvalidOperationException("No <Signature> element in the decrypted XML.");
+            ?? throw new InvalidOperationException("No <Signature> element in the XML.");
         var signature = Convert.FromBase64String(signatureElement.Value);
         signatureElement.Remove();
 
@@ -74,25 +64,25 @@ public class LicenseFileServiceTests
     }
 
     [Fact]
-    public void BuildSignedEncryptedFile_does_not_throw()
+    public void BuildSignedFile_does_not_throw()
     {
-        var (rsa, aesKey) = NewKeys();
-        var service = new LicenseFileService(rsa, aesKey);
+        var rsa = RSA.Create(2048);
+        var service = new LicenseFileService(rsa);
 
-        var exception = Record.Exception(() => service.BuildSignedEncryptedFile(SamplePayload()));
+        var exception = Record.Exception(() => service.BuildSignedFile(SamplePayload()));
 
         Assert.Null(exception);
     }
 
     [Fact]
-    public void BuildSignedEncryptedFile_round_trips_decrypt_verify_and_every_field()
+    public void BuildSignedFile_round_trips_verify_and_every_field()
     {
-        var (rsa, aesKey) = NewKeys();
-        var service = new LicenseFileService(rsa, aesKey);
+        var rsa = RSA.Create(2048);
+        var service = new LicenseFileService(rsa);
         var payload = SamplePayload();
 
-        var base64 = service.BuildSignedEncryptedFile(payload);
-        var xml = DecryptVerifyAndParse(base64, rsa, aesKey);
+        var base64 = service.BuildSignedFile(payload);
+        var xml = VerifyAndParse(base64, rsa);
 
         Assert.Equal(payload.LicenseKey, xml.Element(Ns + "LicenseKey")?.Value);
         Assert.Equal(payload.ActivationId.ToString(), xml.Element(Ns + "ActivationId")?.Value);
@@ -117,37 +107,29 @@ public class LicenseFileServiceTests
     }
 
     [Fact]
-    public void BuildSignedEncryptedFile_with_no_subscription_expiry_writes_an_empty_element()
+    public void BuildSignedFile_with_no_subscription_expiry_writes_an_empty_element()
     {
-        var (rsa, aesKey) = NewKeys();
-        var service = new LicenseFileService(rsa, aesKey);
+        var rsa = RSA.Create(2048);
+        var service = new LicenseFileService(rsa);
         var payload = SamplePayload();
         payload.SubscriptionExpiryUtc = null;
 
-        var base64 = service.BuildSignedEncryptedFile(payload);
-        var xml = DecryptVerifyAndParse(base64, rsa, aesKey);
+        var base64 = service.BuildSignedFile(payload);
+        var xml = VerifyAndParse(base64, rsa);
 
         Assert.Equal("", xml.Element(Ns + "SubscriptionExpiryUtc")?.Value);
     }
 
     [Fact]
-    public void BuildSignedEncryptedFile_signature_does_not_verify_against_a_different_public_key()
+    public void BuildSignedFile_signature_does_not_verify_against_a_different_public_key()
     {
-        var (rsa, aesKey) = NewKeys();
-        var service = new LicenseFileService(rsa, aesKey);
-        var base64 = service.BuildSignedEncryptedFile(SamplePayload());
+        var rsa = RSA.Create(2048);
+        var service = new LicenseFileService(rsa);
+        var base64 = service.BuildSignedFile(SamplePayload());
 
         using var wrongKey = RSA.Create(2048);
-        var envelope = Convert.FromBase64String(base64);
-        var nonce = envelope[..12];
-        var tag = envelope[12..28];
-        var cipherText = envelope[28..];
-        var plainBytes = new byte[cipherText.Length];
-        using (var aes = new AesGcm(aesKey, tag.Length))
-        {
-            aes.Decrypt(nonce, cipherText, tag, plainBytes);
-        }
-        var xml = XElement.Parse(System.Text.Encoding.UTF8.GetString(plainBytes));
+        var signedBytes = Convert.FromBase64String(base64);
+        var xml = XElement.Parse(System.Text.Encoding.UTF8.GetString(signedBytes));
         var signature = Convert.FromBase64String(xml.Element(Ns + "Signature")!.Value);
         xml.Element(Ns + "Signature")!.Remove();
         var canonicalBytes = System.Text.Encoding.UTF8.GetBytes(xml.ToString(SaveOptions.DisableFormatting));

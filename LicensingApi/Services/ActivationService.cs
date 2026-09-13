@@ -194,7 +194,7 @@ public partial class ActivationService
             SubscriptionGraceDays = SubscriptionGraceDays,
         };
 
-        var licenseFile = _fileService.BuildSignedEncryptedFile(new LicenseFilePayload
+        var licenseFile = _fileService.BuildSignedFile(new LicenseFilePayload
         {
             LicenseKey = license.LicenseKey,
             ActivationId = activation.Id,

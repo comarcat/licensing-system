@@ -4,33 +4,21 @@ using System.Xml.Linq;
 namespace ActivationHelloWorld;
 
 /// <summary>
-/// Decrypts and verifies <c>ActivationResultData.LicenseFileBase64</c> exactly per
-/// docs/activation-dll-integration-reference.md §5: AES-256-GCM decrypt, then
-/// RSA-SHA256/PKCS1 verify over the canonicalized (Signature-less, unindented) XML.
+/// Verifies and parses <c>ActivationResultData.LicenseFileBase64</c> exactly per
+/// docs/activation-dll-integration-reference.md §5: base64-decode, RSA-SHA256/PKCS1
+/// verify over the canonicalized (Signature-less, unindented) XML, then parse. As of
+/// 2026-09-13 this is signed only — no encryption layer, no symmetric key needed.
 /// </summary>
 public static class LicenseFile
 {
     private static readonly XNamespace Ns = "urn:licensing:v1";
 
-    public static LicenseFileContents DecryptAndVerify(string base64Envelope, byte[] aesKey, RSA publicKey)
+    public static LicenseFileContents VerifyAndParse(string base64File, RSA publicKey)
     {
-        var envelope = Convert.FromBase64String(base64Envelope);
-        if (envelope.Length < 28)
-            throw new InvalidDataException("License file envelope is too short to contain nonce+tag.");
-
-        var nonce = envelope[..12];
-        var tag = envelope[12..28];
-        var cipherText = envelope[28..];
-
-        var plainBytes = new byte[cipherText.Length];
-        using (var aes = new AesGcm(aesKey, tag.Length))
-        {
-            aes.Decrypt(nonce, cipherText, tag, plainBytes);
-        }
-
-        var xml = XElement.Parse(System.Text.Encoding.UTF8.GetString(plainBytes));
+        var signedBytes = Convert.FromBase64String(base64File);
+        var xml = XElement.Parse(System.Text.Encoding.UTF8.GetString(signedBytes));
         var signatureElement = xml.Element(Ns + "Signature")
-            ?? throw new InvalidDataException("Decrypted XML has no <Signature> element.");
+            ?? throw new InvalidDataException("License file XML has no <Signature> element.");
         var signature = Convert.FromBase64String(signatureElement.Value);
         signatureElement.Remove();
 
