@@ -1,0 +1,232 @@
+@page "/admin/products"
+@using LicensingAdmin.Auth
+@using LicensingAdmin.Products
+@attribute [Authorize(Policy = AuthPolicies.IssueAccess)]
+@inject ProductService ProductSvc
+@inject AuthenticationStateProvider AuthState
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject ILoggerFactory LoggerFactory
+
+<MudText Typo="Typo.h4" Class="mb-1">Productos</MudText>
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+    Catálogo de software licenciable. Un producto solo se puede eliminar si ninguna
+    licencia lo referencia todavía.
+</MudText>
+
+<MudPaper Class="pa-4 mb-6" Elevation="1" MaxWidth="720px">
+    <MudText Typo="Typo.subtitle1" Class="mb-2">Nuevo producto</MudText>
+    <MudGrid>
+        <MudItem xs="12" md="6">
+            <MudTextField @bind-Value="_newName" Label="Nombre" Immediate="true" MaxLength="200" />
+        </MudItem>
+        <MudItem xs="12" md="6">
+            <MudTextField @bind-Value="_newVendor" Label="Fabricante" Immediate="true" MaxLength="200" />
+        </MudItem>
+        <MudItem xs="12" md="6">
+            <MudTextField @bind-Value="_newVersion" Label="Versión actual (opcional)" Immediate="true" MaxLength="50" />
+        </MudItem>
+        <MudItem xs="12" md="6">
+            <MudNumericField @bind-Value="_newMaxActivations" Label="Máx. activaciones por defecto" Min="1" Max="10000" Immediate="true" />
+        </MudItem>
+        <MudItem xs="12">
+            <MudText Typo="Typo.caption" Color="Color.Secondary">Modelo de licencia por defecto</MudText>
+            <div class="d-flex ga-4">
+                <MudCheckBox T="bool" Value="@_newFlags.HasFlag(LicenseModel.Machine)" Dense="true" Label="Machine"
+                             ValueChanged="@(v => ToggleFlag(ref _newFlags, LicenseModel.Machine, v))" />
+                <MudCheckBox T="bool" Value="@_newFlags.HasFlag(LicenseModel.User)" Dense="true" Label="User"
+                             ValueChanged="@(v => ToggleFlag(ref _newFlags, LicenseModel.User, v))" />
+                <MudCheckBox T="bool" Value="@_newFlags.HasFlag(LicenseModel.Floating)" Dense="true" Label="Floating"
+                             ValueChanged="@(v => ToggleFlag(ref _newFlags, LicenseModel.Floating, v))" />
+                <MudCheckBox T="bool" Value="@_newFlags.HasFlag(LicenseModel.Subscription)" Dense="true" Label="Subscription"
+                             ValueChanged="@(v => ToggleFlag(ref _newFlags, LicenseModel.Subscription, v))" />
+            </div>
+        </MudItem>
+    </MudGrid>
+    <MudButton OnClick="CreateAsync" Variant="Variant.Filled" Color="Color.Primary"
+               Disabled="@_busy" StartIcon="@Icons.Material.Filled.Add" Class="mt-2">
+        @(_busy ? "Creando…" : "Crear producto")
+    </MudButton>
+</MudPaper>
+
+@if (_loading)
+{
+    <MudProgressCircular Indeterminate="true" />
+}
+else
+{
+    <MudSimpleTable Dense="true" Hover="true" Style="max-width:960px">
+        <thead>
+            <tr><th>Nombre</th><th>Fabricante</th><th>Versión</th><th>Modelo</th><th>Máx. act.</th><th>Licencias</th><th></th></tr>
+        </thead>
+        <tbody>
+            @foreach (var p in _products)
+            {
+                <tr>
+                    <td>@p.Name</td>
+                    <td>@p.Vendor</td>
+                    <td>@(p.CurrentVersion ?? "—")</td>
+                    <td>@p.DefaultLicenseModel</td>
+                    <td>@p.DefaultMaxActivations</td>
+                    <td>@(_licenseCounts.GetValueOrDefault(p.Id, 0))</td>
+                    <td class="d-flex ga-2">
+                        <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
+                                       OnClick="@(() => EditAsync(p))" Disabled="@_busy" />
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                       OnClick="@(() => DeleteAsync(p))" Disabled="@_busy" />
+                    </td>
+                </tr>
+            }
+            @if (_products.Count == 0)
+            {
+                <tr><td colspan="7"><MudText Typo="Typo.body2" Color="Color.Secondary">Sin productos todavía.</MudText></td></tr>
+            }
+        </tbody>
+    </MudSimpleTable>
+}
+
+@code {
+    private ILogger Logger => LoggerFactory.CreateLogger("LicensingAdmin.Pages.Admin.Products");
+
+    private bool _loading = true;
+    private bool _busy;
+    private List<SoftwareProduct> _products = new();
+    private Dictionary<Guid, int> _licenseCounts = new();
+
+    private string? _newName;
+    private string? _newVendor;
+    private string? _newVersion;
+    private LicenseModel _newFlags = LicenseModel.Machine;
+    private int _newMaxActivations = 5;
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private void ToggleFlag(ref LicenseModel flags, LicenseModel flag, bool value)
+    {
+        flags = value ? flags | flag : flags & ~flag;
+    }
+
+    private async Task ReloadAsync()
+    {
+        _products = (await ProductSvc.ListAsync()).ToList();
+        _licenseCounts.Clear();
+        foreach (var p in _products)
+        {
+            _licenseCounts[p.Id] = await ProductSvc.CountLicensesAsync(p.Id);
+        }
+        _loading = false;
+    }
+
+    private async Task<string?> ActorOrNullAsync()
+    {
+        var actor = CurrentAdmin.Email((await AuthState.GetAuthenticationStateAsync()).User);
+        if (string.IsNullOrWhiteSpace(actor))
+        {
+            Snackbar.Add("Tu sesión ya no es válida. Vuelve a iniciar sesión.", Severity.Error);
+            return null;
+        }
+        return actor;
+    }
+
+    private async Task CreateAsync()
+    {
+        if (_busy) return;
+        var actor = await ActorOrNullAsync();
+        if (actor is null) return;
+
+        if (string.IsNullOrWhiteSpace(_newName) || string.IsNullOrWhiteSpace(_newVendor))
+        {
+            Snackbar.Add("Nombre y fabricante son obligatorios.", Severity.Warning);
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            await ProductSvc.CreateAsync(_newName, _newVendor, _newVersion, _newFlags, _newMaxActivations, actor);
+            Snackbar.Add("Producto creado.", Severity.Success);
+            _newName = null;
+            _newVendor = null;
+            _newVersion = null;
+            _newFlags = LicenseModel.Machine;
+            _newMaxActivations = 5;
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning("Product create failed: {Error}.", ex.GetType().Name);
+            Snackbar.Add("No se pudo crear el producto.", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task EditAsync(SoftwareProduct product)
+    {
+        var parameters = new DialogParameters<EditProductDialog>
+        {
+            { x => x.Product, product },
+        };
+        var dialog = await DialogService.ShowAsync<EditProductDialog>("Editar producto", parameters);
+        var result = await dialog.Result;
+        if (result is { Canceled: false })
+        {
+            var actor = await ActorOrNullAsync();
+            if (actor is null) return;
+
+            _busy = true;
+            try
+            {
+                var edited = (SoftwareProduct)result.Data!;
+                await ProductSvc.UpdateAsync(product.Id, edited.Name, edited.Vendor, edited.CurrentVersion,
+                    edited.DefaultLicenseModel, edited.DefaultMaxActivations, actor);
+                Snackbar.Add("Producto actualizado.", Severity.Success);
+                await ReloadAsync();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning("Product update failed: {Error}.", ex.GetType().Name);
+                Snackbar.Add("No se pudo actualizar el producto.", Severity.Error);
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+
+    private async Task DeleteAsync(SoftwareProduct product)
+    {
+        var confirmed = await DialogService.ShowMessageBox(
+            "Eliminar producto",
+            $"¿Eliminar \"{product.Name}\"? Esta acción no se puede deshacer.",
+            yesText: "Eliminar", cancelText: "Cancelar");
+        if (confirmed != true) return;
+
+        var actor = await ActorOrNullAsync();
+        if (actor is null) return;
+
+        _busy = true;
+        try
+        {
+            await ProductSvc.DeleteAsync(product.Id, actor);
+            Snackbar.Add("Producto eliminado.", Severity.Success);
+            await ReloadAsync();
+        }
+        catch (ProductInUseException ex)
+        {
+            Snackbar.Add($"No se puede eliminar: {ex.LicenseCount} licencia(s) todavía lo usan.", Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning("Product delete failed: {Error}.", ex.GetType().Name);
+            Snackbar.Add("No se pudo eliminar el producto.", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

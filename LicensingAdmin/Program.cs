@@ -1,6 +1,7 @@
 using LicensingAdmin.Auth;
 using LicensingAdmin.Licensing;
 using LicensingAdmin.Notifications;
+using LicensingAdmin.Products;
 using LicensingAdmin.Reports;
 using LicensingAdmin.Startup;
 using LicensingCore.Configuration;
@@ -104,6 +105,9 @@ builder.Services.AddScoped<AuthenticationStateProvider, AdminAuthStateProvider>(
 builder.Services.AddScoped<ILicenseStore, EfLicenseStore>();
 builder.Services.AddScoped<LicenseIssuanceService>();
 
+// Manual revoke/archive on an already-issued license (E4 item 9).
+builder.Services.AddScoped<LicenseLifecycleService>();
+
 // Seeds the first SuperAdmin on startup from Admin:BootstrapEmail / Admin:BootstrapPassword
 // when admin_users is empty; a no-op once a real admin exists or the config is absent.
 builder.Services.AddHostedService<AdminSeeder>();
@@ -117,6 +121,10 @@ builder.Services.AddScoped<NotificationConfigService>();
 
 // Full licenses+activations Excel export (E3 item 5).
 builder.Services.AddScoped<LicenseExportService>();
+
+// Product catalog CRUD (E4 item 8).
+builder.Services.AddScoped<IProductStore, EfProductStore>();
+builder.Services.AddScoped<ProductService>();
 
 var app = builder.Build();
 

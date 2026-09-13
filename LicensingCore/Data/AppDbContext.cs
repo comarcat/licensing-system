@@ -51,6 +51,7 @@ public class AppDbContext : DbContext
             e.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc");
             e.Property(x => x.RevokedAtUtc).HasColumnName("revoked_at_utc");
             e.Property(x => x.RevokedReason).HasColumnName("revoked_reason");
+            e.Property(x => x.IsArchived).HasColumnName("is_archived");
 
             e.HasOne(x => x.Product)
                 .WithMany(p => p.Licenses)
@@ -60,6 +61,7 @@ public class AppDbContext : DbContext
             e.HasIndex(x => x.ProductId);
             e.HasIndex(x => x.Status);
             e.HasIndex(x => x.SubscriptionExpiryUtc);
+            e.HasIndex(x => x.IsArchived);
         });
 
         // ---------------- Activation ----------------

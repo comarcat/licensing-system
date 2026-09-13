@@ -1,101 +1,287 @@
 @page "/licenses"
 @using Microsoft.EntityFrameworkCore
 @using LicensingAdmin.Auth
+@using LicensingAdmin.Licensing
 @attribute [Authorize(Policy = AuthPolicies.ViewerAccess)]
 @inject IDbContextFactory<AppDbContext> DbFactory
+@inject LicenseLifecycleService Lifecycle
+@inject AuthenticationStateProvider AuthState
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+@inject ILoggerFactory LoggerFactory
 
 <MudText Typo="Typo.h4" Class="mb-4">Licenses</MudText>
 
-@if (_loading)
-{
-    <MudProgressCircular Indeterminate="true" />
-}
-else
-{
-    <MudTextField @bind-Value="_search" Immediate="true" Class="mb-4" Style="max-width:420px"
-                  Label="Buscar" Placeholder="Clave, producto, cliente o correo…"
-                  Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" />
+<MudGrid Class="mb-4">
+    <MudItem xs="12" md="4">
+        <MudTextField Value="_search" Immediate="true" DebounceInterval="300"
+                      ValueChanged="@(async (string v) => { _search = v; await ReloadAsync(); })"
+                      Label="Buscar" Placeholder="Clave, producto, cliente o correo…"
+                      Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" />
+    </MudItem>
+    <MudItem xs="6" md="2">
+        <MudSelect T="LicenseStatus?" Value="_statusFilter" ValueChanged="@(async (LicenseStatus? v) => { _statusFilter = v; await ReloadAsync(); })" Label="Estado" Clearable="true">
+            @foreach (var s in Enum.GetValues<LicenseStatus>())
+            {
+                <MudSelectItem T="LicenseStatus?" Value="@((LicenseStatus?)s)">@s</MudSelectItem>
+            }
+        </MudSelect>
+    </MudItem>
+    <MudItem xs="6" md="3">
+        <MudSelect T="Guid?" Value="_productFilter" ValueChanged="@(async (Guid? v) => { _productFilter = v; await ReloadAsync(); })" Label="Producto" Clearable="true">
+            @foreach (var p in _products)
+            {
+                <MudSelectItem T="Guid?" Value="@((Guid?)p.Id)">@p.Name</MudSelectItem>
+            }
+        </MudSelect>
+    </MudItem>
+    <MudItem xs="12" md="3" Class="d-flex align-center">
+        <MudSwitch T="bool" Value="_showArchived" ValueChanged="@(async (bool v) => { _showArchived = v; await ReloadAsync(); })"
+                   Color="Color.Secondary" Label="Mostrar archivadas" />
+    </MudItem>
+</MudGrid>
 
-    <MudTable Items="@_licenses" Hover="true" Dense="true" Filter="@(new Func<License, bool>(Matches))">
-        <HeaderContent>
-            <MudTh>License Key</MudTh>
-            <MudTh>Product</MudTh>
-            <MudTh>Cliente</MudTh>
-            <MudTh>Model</MudTh>
-            <MudTh>Max Act.</MudTh>
-            <MudTh>Used</MudTh>
-            <MudTh>Expiry</MudTh>
-            <MudTh>Status</MudTh>
-        </HeaderContent>
-        <RowTemplate>
-            <MudTd DataLabel="Key"><MudText Typo="Typo.body2" Style="font-family:monospace">@context.LicenseKey</MudText></MudTd>
-            <MudTd DataLabel="Product">@context.Product.Name</MudTd>
-            <MudTd DataLabel="Cliente">
-                @if (string.IsNullOrWhiteSpace(context.CustomerName) && string.IsNullOrWhiteSpace(context.CustomerEmail))
+<MudTable ServerData="ServerReloadAsync" @ref="_table" Hover="true" Dense="true" Loading="_loading" Bordered="false">
+    <HeaderContent>
+        <MudTh>License Key</MudTh>
+        <MudTh>Product</MudTh>
+        <MudTh>Cliente</MudTh>
+        <MudTh>Model</MudTh>
+        <MudTh>Max Act.</MudTh>
+        <MudTh>Used</MudTh>
+        <MudTh>Expiry</MudTh>
+        <MudTh>Status</MudTh>
+        <MudTh></MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Key"><MudText Typo="Typo.body2" Style="font-family:monospace">@context.LicenseKey</MudText></MudTd>
+        <MudTd DataLabel="Product">@context.ProductName</MudTd>
+        <MudTd DataLabel="Cliente">
+            @if (string.IsNullOrWhiteSpace(context.CustomerName) && string.IsNullOrWhiteSpace(context.CustomerEmail))
+            {
+                <MudText Typo="Typo.body2" Color="Color.Secondary">—</MudText>
+            }
+            else
+            {
+                @if (!string.IsNullOrWhiteSpace(context.CustomerName))
                 {
-                    <MudText Typo="Typo.body2" Color="Color.Secondary">—</MudText>
+                    <MudText Typo="Typo.body2">@context.CustomerName</MudText>
                 }
-                else
+                @if (!string.IsNullOrWhiteSpace(context.CustomerEmail))
                 {
-                    @if (!string.IsNullOrWhiteSpace(context.CustomerName))
-                    {
-                        <MudText Typo="Typo.body2">@context.CustomerName</MudText>
-                    }
-                    @if (!string.IsNullOrWhiteSpace(context.CustomerEmail))
-                    {
-                        <MudText Typo="Typo.caption" Color="Color.Secondary">@context.CustomerEmail</MudText>
-                    }
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@context.CustomerEmail</MudText>
                 }
-            </MudTd>
-            <MudTd DataLabel="Model">@context.ModelSnapshot</MudTd>
-            <MudTd DataLabel="Max">@context.MaxActivations</MudTd>
-            <MudTd DataLabel="Used">@context.Activations.Count(a => a.Status == ActivationStatus.Approved)</MudTd>
-            <MudTd DataLabel="Expiry">@(context.SubscriptionExpiryUtc?.ToString("yyyy-MM-dd") ?? "—")</MudTd>
-            <MudTd DataLabel="Status">
-                <MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Status)">@context.Status</MudChip>
-            </MudTd>
-        </RowTemplate>
-    </MudTable>
-    @if (_licenses.Count == 0)
-    {
-        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mt-4">
-            No licenses yet — issue one from "Generar licencia".
-        </MudText>
-    }
-}
+            }
+        </MudTd>
+        <MudTd DataLabel="Model">@context.ModelSnapshot</MudTd>
+        <MudTd DataLabel="Max">@context.MaxActivations</MudTd>
+        <MudTd DataLabel="Used">@context.UsedActivations</MudTd>
+        <MudTd DataLabel="Expiry">@(context.SubscriptionExpiryUtc?.ToString("yyyy-MM-dd") ?? "—")</MudTd>
+        <MudTd DataLabel="Status">
+            <MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Status)">@context.Status</MudChip>
+            @if (context.IsArchived)
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Default">Archivada</MudChip>
+            }
+        </MudTd>
+        <MudTd Class="d-flex ga-2">
+            <AuthorizeView Policy="@AuthPolicies.IssueAccess" Context="authCtx">
+                <Authorized>
+                    @if (context.Status != LicenseStatus.Revoked)
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.Block" Size="Size.Small" Color="Color.Error"
+                                       title="Revocar" OnClick="@(() => RevokeAsync(context))" Disabled="@_busy" />
+                    }
+                    <MudIconButton Icon="@(context.IsArchived ? Icons.Material.Filled.Unarchive : Icons.Material.Filled.Archive)"
+                                   Size="Size.Small" title="@_archiveTitle(context.IsArchived)"
+                                   OnClick="@(() => ToggleArchiveAsync(context))" Disabled="@_busy" />
+                </Authorized>
+            </AuthorizeView>
+        </MudTd>
+    </RowTemplate>
+    <PagerContent>
+        <MudTablePager PageSizeOptions="new[] { 25, 50, 100 }" />
+    </PagerContent>
+</MudTable>
 
 @code {
+    private MudTable<LicenseRow>? _table;
     private bool _loading = true;
-    private List<License> _licenses = new();
+    private bool _busy;
     private string _search = "";
+    private LicenseStatus? _statusFilter;
+    private Guid? _productFilter;
+    private bool _showArchived;
+    private List<ProductOption> _products = new();
+
+    private sealed record ProductOption(Guid Id, string Name);
+
+    private static string _archiveTitle(bool archived) => archived ? "Desarchivar" : "Archivar";
+
+    private sealed class LicenseRow
+    {
+        public Guid Id { get; set; }
+        public string LicenseKey { get; set; } = "";
+        public string ProductName { get; set; } = "";
+        public string? CustomerName { get; set; }
+        public string? CustomerEmail { get; set; }
+        public LicenseModel ModelSnapshot { get; set; }
+        public int MaxActivations { get; set; }
+        public int UsedActivations { get; set; }
+        public DateTime? SubscriptionExpiryUtc { get; set; }
+        public LicenseStatus Status { get; set; }
+        public bool IsArchived { get; set; }
+    }
 
     protected override async Task OnInitializedAsync()
     {
         await using var db = await DbFactory.CreateDbContextAsync();
-        _licenses = await db.Licenses
-            .Include(l => l.Product)
-            .Include(l => l.Activations)
-            .OrderByDescending(l => l.CreatedAtUtc)
+        _products = await db.SoftwareProducts
+            .OrderBy(p => p.Name)
+            .Select(p => new ProductOption(p.Id, p.Name))
             .ToListAsync();
-        _loading = false;
     }
 
-    private bool Matches(License l)
+    private async Task ReloadAsync()
     {
-        if (string.IsNullOrWhiteSpace(_search))
+        if (_table is not null)
         {
-            return true;
+            await _table.ReloadServerData();
+        }
+    }
+
+    private async Task<TableData<LicenseRow>> ServerReloadAsync(TableState state, CancellationToken ct)
+    {
+        _loading = true;
+        await using var db = await DbFactory.CreateDbContextAsync(ct);
+
+        IQueryable<License> query = db.Licenses.AsNoTracking();
+
+        if (!_showArchived)
+        {
+            query = query.Where(l => !l.IsArchived);
+        }
+        if (_statusFilter is { } status)
+        {
+            query = query.Where(l => l.Status == status);
+        }
+        if (_productFilter is { } productId)
+        {
+            query = query.Where(l => l.ProductId == productId);
+        }
+        if (!string.IsNullOrWhiteSpace(_search))
+        {
+            var needle = _search.Trim();
+            query = query.Where(l =>
+                EF.Functions.ILike(l.LicenseKey, $"%{needle}%") ||
+                EF.Functions.ILike(l.Product.Name, $"%{needle}%") ||
+                (l.CustomerName != null && EF.Functions.ILike(l.CustomerName, $"%{needle}%")) ||
+                (l.CustomerEmail != null && EF.Functions.ILike(l.CustomerEmail, $"%{needle}%")));
         }
 
-        var needle = _search.Trim();
-        return Contains(l.LicenseKey, needle)
-            || Contains(l.Product.Name, needle)
-            || Contains(l.CustomerName, needle)
-            || Contains(l.CustomerEmail, needle);
+        var totalItems = await query.CountAsync(ct);
+
+        query = state.SortLabel switch
+        {
+            "expiry" => state.SortDirection == SortDirection.Descending
+                ? query.OrderByDescending(l => l.SubscriptionExpiryUtc)
+                : query.OrderBy(l => l.SubscriptionExpiryUtc),
+            _ => query.OrderByDescending(l => l.CreatedAtUtc),
+        };
+
+        var rows = await query
+            .Skip(state.Page * state.PageSize)
+            .Take(state.PageSize)
+            .Select(l => new LicenseRow
+            {
+                Id = l.Id,
+                LicenseKey = l.LicenseKey,
+                ProductName = l.Product.Name,
+                CustomerName = l.CustomerName,
+                CustomerEmail = l.CustomerEmail,
+                ModelSnapshot = l.ModelSnapshot,
+                MaxActivations = l.MaxActivations,
+                UsedActivations = l.Activations.Count(a => a.Status == ActivationStatus.Approved),
+                SubscriptionExpiryUtc = l.SubscriptionExpiryUtc,
+                Status = l.Status,
+                IsArchived = l.IsArchived,
+            })
+            .ToListAsync(ct);
+
+        _loading = false;
+        return new TableData<LicenseRow> { TotalItems = totalItems, Items = rows };
     }
 
-    private static bool Contains(string? haystack, string needle) =>
-        !string.IsNullOrEmpty(haystack) && haystack.Contains(needle, StringComparison.OrdinalIgnoreCase);
+    private async Task<string?> ActorOrNullAsync()
+    {
+        var actor = CurrentAdmin.Email((await AuthState.GetAuthenticationStateAsync()).User);
+        if (string.IsNullOrWhiteSpace(actor))
+        {
+            Snackbar.Add("Tu sesión ya no es válida. Vuelve a iniciar sesión.", Severity.Error);
+            return null;
+        }
+        return actor;
+    }
+
+    private async Task RevokeAsync(LicenseRow row)
+    {
+        if (_busy) return;
+
+        var parameters = new DialogParameters<RevokeLicenseDialog>
+        {
+            { x => x.LicenseKey, row.LicenseKey },
+        };
+        var dialog = await DialogService.ShowAsync<RevokeLicenseDialog>("Revocar licencia", parameters);
+        var result = await dialog.Result;
+        if (result is { Canceled: true }) return;
+
+        var actor = await ActorOrNullAsync();
+        if (actor is null) return;
+
+        _busy = true;
+        try
+        {
+            var reason = result?.Data as string;
+            await Lifecycle.RevokeAsync(row.Id, reason, actor);
+            Snackbar.Add("Licencia revocada.", Severity.Success);
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            LoggerFactory.CreateLogger("LicensingAdmin.Pages.Licenses")
+                .LogWarning("Revoke failed: {Error}.", ex.GetType().Name);
+            Snackbar.Add("No se pudo revocar la licencia.", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task ToggleArchiveAsync(LicenseRow row)
+    {
+        if (_busy) return;
+        var actor = await ActorOrNullAsync();
+        if (actor is null) return;
+
+        _busy = true;
+        try
+        {
+            await Lifecycle.SetArchivedAsync(row.Id, !row.IsArchived, actor);
+            Snackbar.Add(row.IsArchived ? "Licencia desarchivada." : "Licencia archivada.", Severity.Info);
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            LoggerFactory.CreateLogger("LicensingAdmin.Pages.Licenses")
+                .LogWarning("Archive toggle failed: {Error}.", ex.GetType().Name);
+            Snackbar.Add("No se pudo actualizar la licencia.", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
 
     private static Color StatusColor(LicenseStatus status) => status switch
     {

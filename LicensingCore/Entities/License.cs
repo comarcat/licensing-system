@@ -36,5 +36,14 @@ public class License
     public DateTime? RevokedAtUtc { get; set; }
     public string? RevokedReason { get; set; }
 
+    /// <summary>
+    /// Soft-delete: hidden from the default Licenses list and excluded from dashboard
+    /// counts, but never physically removed — activation history, audit trail and
+    /// referential integrity (Activations.LicenseId, AuditLogEntries) all stay intact.
+    /// Independent of <see cref="Status"/>: an archived license keeps whatever status it
+    /// had (Active/Revoked/Expired) so unarchiving restores it exactly as it was.
+    /// </summary>
+    public bool IsArchived { get; set; }
+
     public ICollection<Activation> Activations { get; set; } = new List<Activation>();
 }
