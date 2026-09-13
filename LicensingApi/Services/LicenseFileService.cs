@@ -53,30 +53,37 @@ public class LicenseFileService : ILicenseFileService
 
     public string BuildSignedEncryptedFile(LicenseFilePayload p)
     {
-        var doc = new XElement("LicenseActivation",
-            new XAttribute("xmlns", "urn:licensing:v1"),
-            new XElement("LicenseKey", p.LicenseKey),
-            new XElement("ActivationId", p.ActivationId),
-            new XElement("InstallGuid", p.InstallGuid),
-            new XElement("Status", p.Status),
-            new XElement("Hardware",
-                new XElement("CpuId", p.CpuId),
-                new XElement("MotherboardSerial", p.MotherboardSerial),
-                new XElement("TpmId", p.TpmId),
-                new XElement("MacAddressPrimary", p.MacAddressPrimary)),
-            new XElement("Policy",
-                new XElement("CheckIntervalHours", p.CheckIntervalHours),
-                new XElement("GraceDays", p.GraceDays),
-                new XElement("SubscriptionGraceDays", p.SubscriptionGraceDays)),
-            new XElement("SubscriptionExpiryUtc", p.SubscriptionExpiryUtc?.ToString("O") ?? ""),
-            new XElement("IssuedAtUtc", p.IssuedAtUtc.ToString("O"))
+        // A plain new XAttribute("xmlns", ns) alongside unqualified element names is not
+        // equivalent to actually putting those elements in the namespace — .ToString()
+        // throws XmlException ("prefix '' cannot be redefined...") because the writer
+        // sees an element genuinely in the empty namespace carrying what looks like a
+        // default-namespace declaration for its (unqualified, still-empty-namespace)
+        // children. Every element must be explicitly qualified with XNamespace for the
+        // declaration and the element tree to agree.
+        XNamespace ns = "urn:licensing:v1";
+        var doc = new XElement(ns + "LicenseActivation",
+            new XElement(ns + "LicenseKey", p.LicenseKey),
+            new XElement(ns + "ActivationId", p.ActivationId),
+            new XElement(ns + "InstallGuid", p.InstallGuid),
+            new XElement(ns + "Status", p.Status),
+            new XElement(ns + "Hardware",
+                new XElement(ns + "CpuId", p.CpuId),
+                new XElement(ns + "MotherboardSerial", p.MotherboardSerial),
+                new XElement(ns + "TpmId", p.TpmId),
+                new XElement(ns + "MacAddressPrimary", p.MacAddressPrimary)),
+            new XElement(ns + "Policy",
+                new XElement(ns + "CheckIntervalHours", p.CheckIntervalHours),
+                new XElement(ns + "GraceDays", p.GraceDays),
+                new XElement(ns + "SubscriptionGraceDays", p.SubscriptionGraceDays)),
+            new XElement(ns + "SubscriptionExpiryUtc", p.SubscriptionExpiryUtc?.ToString("O") ?? ""),
+            new XElement(ns + "IssuedAtUtc", p.IssuedAtUtc.ToString("O"))
         );
 
         var canonicalBytes = Encoding.UTF8.GetBytes(doc.ToString(SaveOptions.DisableFormatting));
 
         // 1. Sign (RSA-SHA256) over the canonical XML bytes.
         var signature = _signingKey.SignData(canonicalBytes, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
-        doc.Add(new XElement("Signature", Convert.ToBase64String(signature)));
+        doc.Add(new XElement(ns + "Signature", Convert.ToBase64String(signature)));
 
         var signedBytes = Encoding.UTF8.GetBytes(doc.ToString(SaveOptions.DisableFormatting));
 
