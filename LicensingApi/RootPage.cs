@@ -9,7 +9,7 @@ public static class RootPage
 {
     public const string Html = """
         <!DOCTYPE html>
-        <html lang="es">
+        <html lang="en">
         <head>
             <meta charset="utf-8" />
             <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -98,13 +98,13 @@ public static class RootPage
                 <div class="logo">⚙</div>
                 <h1>Miautrix</h1>
                 <p>
-                    Este es un servicio interno de Miautrix (API de licenciamiento). Para
-                    más información sobre nuestros productos o para contactarnos, visita
-                    nuestro sitio principal.
+                    This is an internal Miautrix service (Licensing API). For more
+                    information about our products, or to get in touch, visit our
+                    main site.
                 </p>
-                <a class="cta" href="https://miautrix.tech">Contáctanos →</a>
+                <a class="cta" href="https://miautrix.tech">Contact us →</a>
                 <p class="countdown">
-                    Serás redirigido automáticamente en <span id="countdown">30</span> segundos…
+                    You will be redirected automatically in <span id="countdown">30</span> seconds…
                 </p>
             </main>
             <script>
