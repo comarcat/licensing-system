@@ -32,6 +32,7 @@
   <ItemGroup>
     <ProjectReference Include="..\LicensingCore\LicensingCore.csproj" />
     <ProjectReference Include="..\LicensingAdmin\LicensingAdmin.csproj" />
+    <ProjectReference Include="..\LicensingApi\LicensingApi.csproj" />
   </ItemGroup>
 
 </Project>
