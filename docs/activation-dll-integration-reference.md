@@ -14,12 +14,12 @@ nginx on the LXC, which presents a real Cloudflare Origin CA certificate on port
 by Cloudflare's free Universal SSL (only `*.miautrix.tech`, one level, is), so the edge
 has no certificate for it and every request fails at the TLS handshake stage with no
 cert offered at all. `licensing-api.miautrix.tech` is one level and falls under the
-existing wildcard, so it works with no extra cost or delay. As of this writing this is
-freshly reconfigured and not yet re-verified through the public hostname (only the LAN
-path and the origin's own TLS have been confirmed) — see `team/inbox-arq.md` for the
-latest status before relying on this URL. The LAN-only address
-(`http://10.11.1.41:8080`, still unauthenticated/plaintext) still works for local
-testing regardless. See `infra/README.md`.
+existing wildcard, so it works with no extra cost or delay. Confirmed fully live and
+working end to end (2026-09-13): `/health`, a real `/api/activate` call, the correct
+error codes for both a malformed key and a hard `MaxActivationsReached` rejection, and
+the rate limiter (§3) all verified through the actual public path — not just the LAN.
+The LAN-only address (`http://10.11.1.41:8080`, still unauthenticated/plaintext) still
+works for local testing too. See `infra/README.md`.
 
 ---
 
@@ -179,14 +179,11 @@ never blocked by this check, since it isn't consuming a new slot.
 **Rate limiting:** since 2026-09-13, `/api/activate` and `/api/checkin` are throttled
 per client IP address — a fixed window of 30 requests/minute, no queueing (the 31st
 request in a given minute gets `RateLimited` immediately rather than waiting). This
-reads the real client IP from `X-Forwarded-For` (nginx sets it; a live burst test
-confirmed the limiter itself works correctly over the LAN path). Cloudflare Tunnel
-now sits in front for `licensing-api.miautrix.tech` — it's expected to forward the
-real end-client IP the same way, but that specific hop hasn't been re-verified yet
-through the public hostname (still finishing edge setup as of this writing per the
-note at the top of this document) — worth a quick recheck once it's live, since a
-tunnel/proxy that doesn't forward IPs truthfully would make every public client share
-one partition. One public IP shared by many installs (e.g. one office behind NAT)
+reads the real client IP from `X-Forwarded-For` (nginx sets it). Live burst tests
+confirmed the limiter works correctly both over the LAN path and through the full
+public chain (Cloudflare edge → Tunnel → nginx) — same threshold both times: 30
+requests pass, the 31st onward all return `RateLimited`. One public IP shared by many
+installs (e.g. one office behind NAT)
 shares the same 30/min
 budget — if that's too tight for a real deployment, this is a single number
 (`PermitLimit` in `LicensingApi/Program.cs`) to tune, not a redesign.
