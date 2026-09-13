@@ -31,12 +31,14 @@ CREATE TABLE licenses (
     customer_name            varchar(200),
     created_at_utc           timestamptz NOT NULL DEFAULT now(),
     revoked_at_utc           timestamptz,
-    revoked_reason           text
+    revoked_reason           text,
+    is_archived              boolean NOT NULL DEFAULT false
 );
 CREATE UNIQUE INDEX ux_licenses_license_key ON licenses (license_key);
 CREATE INDEX ix_licenses_product_id ON licenses (product_id);
 CREATE INDEX ix_licenses_status ON licenses (status);
 CREATE INDEX ix_licenses_subscription_expiry_utc ON licenses (subscription_expiry_utc);
+CREATE INDEX ix_licenses_is_archived ON licenses (is_archived);
 
 CREATE TABLE activations (
     id                       uuid PRIMARY KEY DEFAULT gen_random_uuid(),

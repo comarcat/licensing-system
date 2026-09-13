@@ -1,0 +1,76 @@
+@using LicensingCore.Entities
+
+<MudDialog>
+    <DialogContent>
+        <MudGrid>
+            <MudItem xs="12" md="6">
+                <MudTextField @bind-Value="_name" Label="Nombre" Immediate="true" MaxLength="200" />
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudTextField @bind-Value="_vendor" Label="Fabricante" Immediate="true" MaxLength="200" />
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudTextField @bind-Value="_version" Label="Versión actual (opcional)" Immediate="true" MaxLength="50" />
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudNumericField @bind-Value="_maxActivations" Label="Máx. activaciones por defecto" Min="1" Max="10000" Immediate="true" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Modelo de licencia por defecto</MudText>
+                <div class="d-flex ga-4">
+                    <MudCheckBox T="bool" Value="@_flags.HasFlag(LicenseModel.Machine)" Dense="true" Label="Machine"
+                                 ValueChanged="@(v => Toggle(LicenseModel.Machine, v))" />
+                    <MudCheckBox T="bool" Value="@_flags.HasFlag(LicenseModel.User)" Dense="true" Label="User"
+                                 ValueChanged="@(v => Toggle(LicenseModel.User, v))" />
+                    <MudCheckBox T="bool" Value="@_flags.HasFlag(LicenseModel.Floating)" Dense="true" Label="Floating"
+                                 ValueChanged="@(v => Toggle(LicenseModel.Floating, v))" />
+                    <MudCheckBox T="bool" Value="@_flags.HasFlag(LicenseModel.Subscription)" Dense="true" Label="Subscription"
+                                 ValueChanged="@(v => Toggle(LicenseModel.Subscription, v))" />
+                </div>
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancelar</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Submit">Guardar</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public SoftwareProduct Product { get; set; } = default!;
+
+    private string _name = "";
+    private string _vendor = "";
+    private string? _version;
+    private LicenseModel _flags;
+    private int _maxActivations;
+
+    protected override void OnInitialized()
+    {
+        _name = Product.Name;
+        _vendor = Product.Vendor;
+        _version = Product.CurrentVersion;
+        _flags = Product.DefaultLicenseModel;
+        _maxActivations = Product.DefaultMaxActivations;
+    }
+
+    private void Toggle(LicenseModel flag, bool value) =>
+        _flags = value ? _flags | flag : _flags & ~flag;
+
+    private void Submit()
+    {
+        var edited = new SoftwareProduct
+        {
+            Id = Product.Id,
+            Name = _name,
+            Vendor = _vendor,
+            CurrentVersion = _version,
+            DefaultLicenseModel = _flags,
+            DefaultMaxActivations = _maxActivations,
+        };
+        MudDialog.Close(DialogResult.Ok(edited));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+}

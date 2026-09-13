@@ -1,0 +1,24 @@
+<MudDialog>
+    <DialogContent>
+        <MudText Class="mb-3">
+            Revocar <span style="font-family:monospace">@LicenseKey</span>. El DLL de activación
+            dejará de validar esta licencia en el próximo checkin. Esta acción no se puede deshacer
+            desde la interfaz.
+        </MudText>
+        <MudTextField @bind-Value="_reason" Label="Motivo (opcional)" Lines="2" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancelar</MudButton>
+        <MudButton Color="Color.Error" Variant="Variant.Filled" OnClick="Submit">Revocar</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public string LicenseKey { get; set; } = "";
+
+    private string? _reason;
+
+    private void Submit() => MudDialog.Close(DialogResult.Ok(_reason));
+    private void Cancel() => MudDialog.Cancel();
+}

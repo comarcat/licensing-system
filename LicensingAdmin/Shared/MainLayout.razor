@@ -38,6 +38,9 @@
             <AuthorizeView Policy="@AuthPolicies.IssueAccess">
                 <MudNavLink Href="licenses/new" Icon="@Icons.Material.Filled.AddCircleOutline">Generar licencia</MudNavLink>
             </AuthorizeView>
+            <AuthorizeView Policy="@AuthPolicies.IssueAccess">
+                <MudNavLink Href="admin/products" Icon="@Icons.Material.Filled.Inventory2">Productos</MudNavLink>
+            </AuthorizeView>
             <AuthorizeView Policy="@AuthPolicies.AdminUserAccess">
                 <MudNavLink Href="admin/users" Icon="@Icons.Material.Filled.ManageAccounts">Usuarios admin</MudNavLink>
             </AuthorizeView>
