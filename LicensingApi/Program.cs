@@ -83,6 +83,7 @@ app.UseRateLimiter();
 
 app.MapControllers();
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+app.MapGet("/", () => Results.Content(LicensingApi.RootPage.Html, "text/html"));
 
 app.Run();
 

@@ -20,39 +20,27 @@
     <main class="landing">
         <div class="landing-card">
             <div class="landing-logo">⚙</div>
-            <h1 class="landing-title">Miautrix</h1>
+            <h1 class="landing-title">Miautrix Licensing System</h1>
+            <p class="landing-tagline">
+                El centro de control para emitir, activar y proteger cada licencia de tu
+                software. Claves firmadas criptográficamente, activaciones verificadas por
+                huella de hardware y revisión humana cuando algo no cuadra — todo en un
+                solo panel.
+            </p>
+
+            <div class="landing-features">
+                <div class="landing-feature"><span class="landing-feature-icon">🔑</span><span>Emisión de licencias con clave firmada RSA</span></div>
+                <div class="landing-feature"><span class="landing-feature-icon">🛡️</span><span>Activaciones verificadas por huella de hardware</span></div>
+                <div class="landing-feature"><span class="landing-feature-icon">📋</span><span>Auditoría completa de cada acción administrativa</span></div>
+            </div>
 
             @if (authenticated)
             {
-                <p class="landing-tagline">Sesión activa detectada.</p>
                 <a class="landing-cta" href="/dashboard">Ir al panel →</a>
             }
             else
             {
-                <p class="landing-tagline">
-                    Este es un sistema interno de Miautrix. Para más información sobre
-                    nuestros productos o para contactarnos, visita nuestro sitio principal.
-                </p>
-                <a class="landing-cta" href="https://miautrix.tech" id="contact-link">Contáctanos →</a>
-                <p class="landing-countdown">
-                    Serás redirigido automáticamente en <span id="countdown">30</span> segundos…
-                </p>
-                <a class="landing-staff-link" href="/Account/Login">Acceso de staff</a>
-
-                <script>
-                    (function () {
-                        var seconds = 30;
-                        var el = document.getElementById('countdown');
-                        var timer = setInterval(function () {
-                            seconds -= 1;
-                            if (el) el.textContent = seconds;
-                            if (seconds <= 0) {
-                                clearInterval(timer);
-                                window.location.href = 'https://miautrix.tech';
-                            }
-                        }, 1000);
-                    })();
-                </script>
+                <a class="landing-cta" href="/Account/Login">Iniciar sesión →</a>
             }
         </div>
     </main>
