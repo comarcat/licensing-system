@@ -10,14 +10,13 @@ around key storage, retries, and offline grace UX than this does.
 ## Run
 
 ```
-dotnet run --project ActivationHelloWorld -- --base-url http://10.11.1.41:8080
+dotnet run --project ActivationHelloWorld
 ```
 
-- `--base-url <url>` or `ACTIVATION_BASE_URL` env var — defaults to the LAN address.
-  `https://licensing-api.miautrix.tech` (Cloudflare Tunnel + Origin CA cert) is live and
-  confirmed working end to end as of 2026-09-13 — pass
-  `--base-url https://licensing-api.miautrix.tech` to test through the real public path
-  instead of the LAN.
+- `--base-url <url>` or `ACTIVATION_BASE_URL` env var — defaults to
+  `https://licensing-api.miautrix.tech`, the live public endpoint (Cloudflare Tunnel +
+  Origin CA cert, confirmed working end to end as of 2026-09-13). Pass
+  `--base-url http://10.11.1.41:8080` to test against the LAN-direct address instead.
 - `--aes-key-file <path>` or `ACTIVATION_AES_KEY_BASE64` env var — the symmetric AES
   key used to decrypt license files (get it out of band, never commit it; see
   `docs/activation-dll-integration-reference.md` §5.2). Without it the app still

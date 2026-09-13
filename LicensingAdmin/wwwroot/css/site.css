@@ -231,3 +231,23 @@ code, .mud-input-slot, .mud-table-cell {
 .landing-cta:hover {
     opacity: .9;
 }
+
+.landing-countdown {
+    color: rgba(255, 255, 255, .45);
+    font-family: 'DM Sans', sans-serif;
+    font-size: .85rem;
+    margin: 20px 0 0;
+}
+
+.landing-staff-link {
+    display: inline-block;
+    color: rgba(255, 255, 255, .35);
+    font-family: 'DM Sans', sans-serif;
+    font-size: .8rem;
+    text-decoration: none;
+    margin-top: 28px;
+}
+
+.landing-staff-link:hover {
+    color: rgba(255, 255, 255, .6);
+}

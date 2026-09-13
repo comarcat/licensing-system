@@ -10,7 +10,7 @@ using ActivationHelloWorld;
 // as a production integration — a real DLL would harden key storage, retry/backoff,
 // and offline grace UX far more than this does.
 
-var baseUrl = ArgOrEnv(args, "--base-url", "ACTIVATION_BASE_URL") ?? "http://10.11.1.41:8080";
+var baseUrl = ArgOrEnv(args, "--base-url", "ACTIVATION_BASE_URL") ?? "https://licensing-api.miautrix.tech";
 Console.WriteLine($"LicensingApi base URL: {baseUrl}");
 
 var aesKey = LoadAesKey(args);
