@@ -91,11 +91,37 @@ chown -R "$DEPLOY_USER:$DEPLOY_USER" /var/www/licensing
 chmod 750 /etc/licensing-admin /etc/licensing-api
 chown root:"$DEPLOY_USER" /etc/licensing-admin /etc/licensing-api
 
-echo "==> nginx reverse proxy vhosts (licensing-admin: 5000, licensing-api: 5001)"
+echo "==> self-signed TLS cert for licensing-admin (LAN IP only, no public DNS yet)"
+# LicensingAdmin's cookie auth uses CookieSecurePolicy.Always outside Development, so the
+# browser silently drops the auth cookie over plain HTTP — TLS at nginx is not optional
+# here, even though this is only reached by LAN IP. A self-signed cert is fine for that
+# (browsers will warn once, "advanced -> proceed"); revisit with a real cert if this ever
+# gets a public hostname.
+LXC_IP="${LXC_IP:-$(hostname -I | awk '{print $1}')}"
+mkdir -p /etc/nginx/ssl
+if [ ! -f /etc/nginx/ssl/licensing-admin.crt ]; then
+  openssl req -x509 -nodes -days 825 -newkey rsa:2048 \
+    -keyout /etc/nginx/ssl/licensing-admin.key \
+    -out /etc/nginx/ssl/licensing-admin.crt \
+    -subj "/CN=$LXC_IP" \
+    -addext "subjectAltName=IP:$LXC_IP"
+  chmod 600 /etc/nginx/ssl/licensing-admin.key
+fi
+
+echo "==> nginx reverse proxy vhosts (licensing-admin: 5000 over TLS, licensing-api: 5001 plain)"
 cat > /etc/nginx/sites-available/licensing-admin.conf <<'NGINX'
 server {
     listen 80;
     server_name _;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name _;
+
+    ssl_certificate     /etc/nginx/ssl/licensing-admin.crt;
+    ssl_certificate_key /etc/nginx/ssl/licensing-admin.key;
 
     location / {
         proxy_pass http://127.0.0.1:5000;
@@ -134,9 +160,10 @@ nginx -t
 systemctl enable nginx
 systemctl restart nginx
 
-echo "==> firewall (OpenSSH + nginx's two ports; app ports 5000/5001 only on loopback, never exposed)"
+echo "==> firewall (OpenSSH + nginx's ports; app ports 5000/5001 only on loopback, never exposed)"
 ufw allow OpenSSH
 ufw allow 80/tcp
+ufw allow 443/tcp
 ufw allow 8080/tcp
 ufw --force enable
 

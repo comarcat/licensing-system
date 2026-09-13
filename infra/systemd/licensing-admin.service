@@ -3,7 +3,7 @@ Description=Licensing Admin (Blazor Server)
 After=network.target
 
 [Service]
-Type=notify
+Type=simple
 WorkingDirectory=/var/www/licensing/admin
 ExecStart=/usr/local/bin/dotnet /var/www/licensing/admin/LicensingAdmin.dll
 Restart=always

@@ -3,7 +3,7 @@ Description=Licensing API
 After=network.target
 
 [Service]
-Type=notify
+Type=simple
 WorkingDirectory=/var/www/licensing/api
 ExecStart=/usr/local/bin/dotnet /var/www/licensing/api/LicensingApi.dll
 Restart=always
