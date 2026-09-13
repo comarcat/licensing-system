@@ -19,7 +19,7 @@
 
 set -euo pipefail
 
-LXC_HOST="${LXC_HOST:?Set LXC_HOST to the container's IP or hostname, e.g. LXC_HOST=10.11.1.41}"
+LXC_HOST="${LXC_HOST:?Set LXC_HOST to the container IP or hostname, e.g. LXC_HOST=10.11.1.41}"
 DEPLOY_USER="${DEPLOY_USER:-deploy}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PUBLISH_DIR="$REPO_ROOT/publish"
@@ -38,10 +38,14 @@ echo "==> stopping services on $LXC_HOST"
 ssh "root@$LXC_HOST" "systemctl stop licensing-admin licensing-api || true"
 
 echo "==> syncing published output"
-rsync -az --delete "$PUBLISH_DIR/admin/" "$DEPLOY_USER@$LXC_HOST:/var/www/licensing/admin/"
-rsync -az --delete "$PUBLISH_DIR/api/" "$DEPLOY_USER@$LXC_HOST:/var/www/licensing/api/"
+# scp, not rsync: the Windows build machine's Git Bash does not ship rsync. This
+# clears the remote directory first so stale files from a previous publish (e.g. a
+# renamed/removed dependency DLL) never linger, since scp -r only ever adds/overwrites.
+ssh "$DEPLOY_USER@$LXC_HOST" "rm -rf /var/www/licensing/admin/* /var/www/licensing/api/*"
+scp -rq "$PUBLISH_DIR/admin/." "$DEPLOY_USER@$LXC_HOST:/var/www/licensing/admin/"
+scp -rq "$PUBLISH_DIR/api/." "$DEPLOY_USER@$LXC_HOST:/var/www/licensing/api/"
 
 echo "==> starting services on $LXC_HOST"
 ssh "root@$LXC_HOST" "systemctl daemon-reload && systemctl start licensing-admin licensing-api && systemctl --no-pager status licensing-admin licensing-api"
 
-echo "==> done. Admin: http://$LXC_HOST/  API: http://$LXC_HOST:8080/"
+echo "==> done. Admin: https://$LXC_HOST/  API: http://$LXC_HOST:8080/"

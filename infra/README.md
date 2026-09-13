@@ -18,9 +18,20 @@ Both talk to the same remote Postgres instance the Windows dev setup already use
    This installs nginx, the .NET 8 ASP.NET Core runtime (via Microsoft's
    `dotnet-install.sh`, not apt — trixie's own .NET packaging is too new to rely on),
    `postgresql-client`, creates a `deploy` user, the `/var/www/licensing/{admin,api}`
-   and `/etc/licensing-{admin,api}` directories, and two nginx reverse-proxy vhosts
-   (admin on `:80`, api on `:8080`, both proxying to loopback-only Kestrel processes
-   on `:5000`/`:5001`). ufw is enabled with only SSH + those two ports open.
+   and `/etc/licensing-{admin,api}` directories, a self-signed TLS cert for the admin
+   vhost, and two nginx reverse-proxy vhosts (admin on `:443` TLS with `:80` redirecting
+   to it, api on `:8080` plain, both proxying to loopback-only Kestrel processes on
+   `:5000`/`:5001`). ufw is enabled with SSH + those three ports open.
+
+   **Why the admin vhost needs TLS at all on a LAN-only IP**: `LicensingAdmin`'s cookie
+   auth sets `CookieSecurePolicy.Always` outside `Development` — the browser silently
+   drops the auth cookie over plain HTTP, so login succeeds server-side but every
+   subsequent request looks anonymous and bounces back to `/Account/Login`. A
+   self-signed cert is enough to fix this (accept the one-time browser warning); nginx
+   also sends `X-Forwarded-Proto`, and `LicensingAdmin/Program.cs` calls
+   `app.UseForwardedHeaders(...)` (added specifically for this deployment, first thing
+   after `app.Build()`) so the app correctly sees the original request as HTTPS even
+   though nginx talks to Kestrel over plain loopback HTTP.
 
 2. **Install the systemd units** (one-time, or whenever `infra/systemd/*.service` changes):
    ```bash
@@ -72,15 +83,28 @@ From the build machine (Windows dev box, this repo checkout):
 ```bash
 LXC_HOST=10.11.1.41 ./infra/deploy.sh
 ```
-This publishes both projects framework-dependent for `linux-x64`, rsyncs the output
-over (stopping/restarting the services around the sync), and leaves the
-`EnvironmentFile`s and systemd unit definitions untouched. Safe to re-run any time.
+This publishes both projects framework-dependent for `linux-x64`, copies the output
+over via `scp -r` (stopping/restarting the services around the sync — the Windows
+build machine's Git Bash has no `rsync`), and leaves the `EnvironmentFile`s and
+systemd unit definitions untouched. Safe to re-run any time.
+
+## Live now
+
+- **Admin**: `https://10.11.1.41/` (self-signed cert — accept the browser warning once).
+  SuperAdmin `comarcat@gmail.com`.
+- **API**: `http://10.11.1.41:8080/` (plain HTTP — no cookie auth there yet, so no
+  `CookieSecurePolicy` issue; revisit if that changes).
+- Both systemd units use `Type=simple`, not `Type=notify` — neither app calls
+  `IHostBuilder`'s systemd integration (`UseSystemd()`)/`sd_notify`, so `Type=notify`
+  just times out waiting for a readiness signal that never comes and kills a
+  perfectly healthy process. If `UseSystemd()` is ever added to either `Program.cs`,
+  switch the matching unit back to `Type=notify`.
 
 ## Not done yet / open items
 
-- **TLS**: none configured. The LXC is reached by LAN IP with no public DNS name yet.
-  Revisit (Let's Encrypt via certbot, or an internal CA) if this becomes
-  internet-facing or gets a real hostname.
+- **Real TLS cert**: currently self-signed, since the LXC is reached by LAN IP with no
+  public DNS name yet. Revisit (Let's Encrypt via certbot, or an internal CA) if this
+  becomes internet-facing or gets a real hostname.
 - **Postgres password**: per `team/inbox-arq.md` (2026-09-13), the current password
   closely resembles the old leaked `Test2020#` and the user has deferred rotating it
   ("proyecto va a correr en local por un tiempo") — not blocking, but the
