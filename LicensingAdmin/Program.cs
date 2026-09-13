@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using MudBlazor.Services;
@@ -106,6 +107,17 @@ builder.Services.AddScoped<LicenseIssuanceService>();
 builder.Services.AddHostedService<AdminSeeder>();
 
 var app = builder.Build();
+
+// Must run before anything that inspects Request.Scheme/IsHttps (HSTS redirect, the
+// cookie's CookieSecurePolicy.Always check, absolute-URL generation) — nginx terminates
+// TLS and proxies to Kestrel over plain loopback HTTP, so without this the app sees every
+// request as HTTP and the auth cookie (Secure in Production) never gets accepted by the
+// browser. Default KnownProxies/KnownNetworks already trust loopback, which is exactly
+// where nginx proxies from here.
+app.UseForwardedHeaders(new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
+});
 
 if (!app.Environment.IsDevelopment())
 {

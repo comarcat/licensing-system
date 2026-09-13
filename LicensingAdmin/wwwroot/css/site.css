@@ -5,3 +5,137 @@ html, body {
 .mud-drawer {
     width: 240px;
 }
+
+/* ---------------------------------------------------------------------
+   Lustro theme: dark glassmorphism ambient background + glass surfaces.
+   Colors/tokens match LustroTheme.cs (PaletteDark) so CSS and MudBlazor
+   stay in sync without duplicating the palette in two formats.
+--------------------------------------------------------------------- */
+body {
+    background: #0a0e1a;
+    position: relative;
+}
+
+body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background:
+        radial-gradient(circle at 15% 20%, rgba(99, 102, 241, .22) 0%, transparent 50%),
+        radial-gradient(circle at 85% 80%, rgba(236, 72, 153, .15) 0%, transparent 50%),
+        radial-gradient(circle at 50% 50%, rgba(34, 211, 238, .08) 0%, transparent 60%);
+    z-index: 0;
+    pointer-events: none;
+}
+
+.mud-layout {
+    position: relative;
+    z-index: 1;
+}
+
+.glass-surface {
+    background: linear-gradient(135deg, rgba(255, 255, 255, .06), rgba(255, 255, 255, .02)) !important;
+    backdrop-filter: blur(40px);
+    -webkit-backdrop-filter: blur(40px);
+    border: 1px solid rgba(255, 255, 255, .1) !important;
+}
+
+.mud-paper {
+    background: linear-gradient(135deg, rgba(255, 255, 255, .05), rgba(255, 255, 255, .015));
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid rgba(255, 255, 255, .08);
+}
+
+code, .mud-input-slot, .mud-table-cell {
+    font-family: 'JetBrains Mono', monospace;
+}
+
+/* Plain Razor Pages outside the Blazor/MudBlazor tree (Login, Logout, AccessDenied) —
+   they share site.css but get none of MudBlazor's component styling, so they need
+   their own readable-on-dark-background rules, scoped to .auth-page so nothing here
+   leaks into the Blazor-rendered app shell. */
+.auth-page {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'DM Sans', sans-serif;
+    color: #ffffff;
+    padding: 24px;
+}
+
+.auth-card {
+    width: 100%;
+    max-width: 380px;
+    background: linear-gradient(135deg, rgba(255, 255, 255, .06), rgba(255, 255, 255, .02));
+    backdrop-filter: blur(40px);
+    -webkit-backdrop-filter: blur(40px);
+    border: 1px solid rgba(255, 255, 255, .1);
+    border-radius: 22px;
+    padding: 32px;
+}
+
+.auth-card h1 {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin: 0 0 20px;
+    color: #ffffff;
+}
+
+.auth-card label {
+    display: block;
+    font-size: .85rem;
+    color: rgba(255, 255, 255, .7);
+    margin-bottom: 16px;
+}
+
+.auth-card input {
+    display: block;
+    width: 100%;
+    margin-top: 6px;
+    padding: 10px 12px;
+    background: rgba(255, 255, 255, .06);
+    border: 1px solid rgba(255, 255, 255, .22);
+    border-radius: 10px;
+    color: #ffffff;
+    font-family: 'DM Sans', sans-serif;
+    font-size: .95rem;
+}
+
+.auth-card input:focus {
+    outline: none;
+    border-color: #6366f1;
+}
+
+.auth-card button {
+    margin-top: 8px;
+    padding: 10px 20px;
+    background: linear-gradient(135deg, #6366f1, #ec4899);
+    border: none;
+    border-radius: 10px;
+    color: #ffffff;
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 600;
+    font-size: .9rem;
+    cursor: pointer;
+}
+
+.auth-card button:hover {
+    opacity: .9;
+}
+
+.auth-card p {
+    color: rgba(255, 255, 255, .7);
+    font-size: .9rem;
+}
+
+.auth-card a {
+    color: #a5b4fc;
+}
+
+.auth-error {
+    color: #f87171 !important;
+    font-size: .85rem;
+}

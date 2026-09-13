@@ -1,0 +1,20 @@
+[Unit]
+Description=Licensing Admin (Blazor Server)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/var/www/licensing/admin
+ExecStart=/usr/local/bin/dotnet /var/www/licensing/admin/LicensingAdmin.dll
+Restart=always
+RestartSec=5
+KillSignal=SIGINT
+SyslogIdentifier=licensing-admin
+User=deploy
+Environment=ASPNETCORE_ENVIRONMENT=Production
+Environment=ASPNETCORE_URLS=http://127.0.0.1:5000
+Environment=DOTNET_PRINT_TELEMETRY_MESSAGE=false
+EnvironmentFile=/etc/licensing-admin/env
+
+[Install]
+WantedBy=multi-user.target
