@@ -143,9 +143,14 @@ nginx) with a live burst test, not just by inspecting config.
 
 ## Not done yet / open items
 
-- **Postgres password**: per `team/inbox-arq.md` (2026-09-13), the current password
-  closely resembles the old leaked `Test2020#` and the user has deferred rotating it —
-  now more urgent since the API is publicly reachable, not just LAN-only.
+- ~~**Postgres password**~~ — **rotated 2026-09-13.** The role's password on
+  `172.16.101.12` was changed via `ALTER ROLE`, verified with a fresh connection under
+  the new password before touching anything else, then updated in
+  `/etc/licensing-admin/env` and `/etc/licensing-api/env` on the LXC and in local
+  `dotnet user-secrets` for `LicensingAdmin`. Both services restarted and confirmed
+  reaching the database (health check + a real DB-backed page load, `journalctl`
+  checked for auth errors — none). The new value is not recorded in this repo or in
+  any file here; it lives in the two `EnvironmentFile`s and user-secrets only.
 - **Backups**: `postgresql-client` is installed on the LXC for ad-hoc `pg_dump`/`psql`
   access, but there's no scheduled backup job yet (mirroring miautrix-website's
   `infra/backup.sh` pattern would be the natural next step if wanted).
