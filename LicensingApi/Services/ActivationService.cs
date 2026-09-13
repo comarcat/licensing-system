@@ -70,6 +70,11 @@ public partial class ActivationService
         else
         {
             // No hardware match on record for this license: new install or a changed machine.
+            var approvedCount = license.Activations.Count(a => a.Status == ActivationStatus.Approved);
+            if (approvedCount >= license.MaxActivations)
+                return ApiResult.Fail(ResultCode.MaxActivationsReached,
+                    $"Maximum number of active installations ({license.MaxActivations}) reached for this license.");
+
             activation = new Activation
             {
                 Id = Guid.NewGuid(),
@@ -84,12 +89,6 @@ public partial class ActivationService
                 ReviewDeadlineUtc = DateTime.UtcNow.AddDays(ReviewGraceDays),
             };
             ApplyEnvironmentInfo(activation, req.Hardware, req.Vm);
-
-            var approvedCount = license.Activations.Count(a => a.Status == ActivationStatus.Approved);
-            if (approvedCount >= license.MaxActivations)
-            {
-                activation.ReviewNotes = $"Max activations ({license.MaxActivations}) already reached; review carefully.";
-            }
 
             _db.Activations.Add(activation);
             isNewInstall = true;

@@ -249,7 +249,7 @@ public sealed class ActivationServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task Activate_MaxActivationsReached_StillPendingReviewButFlagged()
+    public async Task Activate_MaxActivationsReached_RejectsWithoutCreatingActivation()
     {
         var license = await SeedLicenseAsync(maxActivations: 1);
         await SeedActivationAsync(license, Hw("1"), ActivationStatus.Approved);
@@ -261,10 +261,27 @@ public sealed class ActivationServiceTests : IDisposable
             Hardware = Hw("2"),
         }, Ct);
 
+        Assert.False(result.Success);
+        Assert.Equal(ResultCode.MaxActivationsReached, result.Code);
+        Assert.Equal(1, await _db.Activations.CountAsync(Ct));
+    }
+
+    [Fact]
+    public async Task Activate_UnderMaxActivations_StillSucceeds()
+    {
+        var license = await SeedLicenseAsync(maxActivations: 2);
+        await SeedActivationAsync(license, Hw("1"), ActivationStatus.Approved);
+
+        var result = await _service.ActivateAsync(new ActivateRequest
+        {
+            LicenseKey = license.LicenseKey,
+            InstallGuid = Guid.NewGuid(),
+            Hardware = Hw("2"),
+        }, Ct);
+
         Assert.True(result.Success);
         Assert.Equal(ResultCode.PendingReview, result.Code);
-        var created = await _db.Activations.FirstAsync(a => a.Id == result.Data!.ActivationId, Ct);
-        Assert.Contains("Max activations", created.ReviewNotes);
+        Assert.Equal(2, await _db.Activations.CountAsync(Ct));
     }
 
     // ---------------------------------------------------------------------

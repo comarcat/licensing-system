@@ -95,10 +95,13 @@ public class CheckinRequest
 ```
 
 **If the hardware no longer matches** what's on record for this `ActivationId`, the
-server transparently re-runs the `/activate` flow internally (same rules as a fresh
-activation attempt, including possibly creating a new `PendingReview` activation) — so
-a checkin on drifted hardware can come back `pending_review` even though the client
-only asked to check in.
+server re-opens review on this **same** activation row — new fingerprint recorded,
+`Status` back to `PendingReview`, a fresh `GraceDays`-day `ReviewDeadlineUtc` — rather
+than creating a second row (the `(LicenseId, InstallGuid)` pair is unique per license,
+and your `InstallGuid` is stable across a hardware change, so a second row for the same
+install could never be created anyway). So a checkin on drifted hardware can come back
+`pending_review` even though the client only asked to check in, but `ActivationId`
+never changes underneath you.
 
 ### `GET /health`
 
@@ -151,21 +154,26 @@ public class PolicyDto
 | `LicenseExpired`         | 403 | License row's own `Status` is `Expired` |
 | `LicenseRevoked`         | 403 | License row's own `Status` is `Revoked` |
 | `InstallGuidMismatch`    | 403 | Checkin: `InstallGuid` doesn't match the activation record |
-| `MaxActivationsReached`  | 409 | Informational only today — see note below |
-| `RateLimited`            | 429 | Reserved; **rate limiting is not implemented yet** (tracked as a TODO in `ActivationController`) |
+| `MaxActivationsReached`  | 409 | New install rejected: `License.MaxActivations` already reached — no `Activation` row is created |
+| `RateLimited`            | 429 | Per-client-IP throttle tripped — see note below |
 | `ServerError`            | 500 | Unhandled exception; retry with backoff |
 
-**Note on `MaxActivationsReached`:** as implemented today, exceeding
-`License.MaxActivations` does **not** reject the activation — it still creates a
-`PendingReview` activation and adds a note for the reviewer ("Max activations already
-reached; review carefully"). The 409 status/code above is defined but not currently
-returned by `ActivateAsync`; don't rely on the API rejecting over-limit activations by
-itself. This is worth flagging to the Architect/Builder if the client tool needs a hard
-enforcement, since today it is enforced only by human review policy.
+**Note on `MaxActivationsReached`:** enforced as a hard rejection since 2026-09-13. A
+*new* install (no existing hardware match on this license) is rejected outright —
+`Data` is `null`, `Message` explains the limit — when the count of currently `Approved`
+activations already meets `License.MaxActivations`. This only gates brand-new
+installs; reactivating an existing approved/pending-review machine (same hardware) is
+never blocked by this check, since it isn't consuming a new slot.
 
-Known limitation: an unauthenticated client can call `/api/activate` and `/api/checkin`
-with no rate limiting today. If the client tool retries aggressively on failure, throttle
-client-side until the server-side TODO is addressed.
+**Rate limiting:** since 2026-09-13, `/api/activate` and `/api/checkin` are throttled
+per client IP address — a fixed window of 30 requests/minute, no queueing (the 31st
+request in a given minute gets `RateLimited` immediately rather than waiting). This
+reads the real client IP from `X-Forwarded-For` (nginx sets it; make sure any
+additional reverse proxy in front — e.g. Cloudflare — is configured to forward or set
+that header truthfully, since the limiter partitions on whatever IP it sees). One
+public IP shared by many installs (e.g. one office behind NAT) shares the same 30/min
+budget — if that's too tight for a real deployment, this is a single number
+(`PermitLimit` in `LicensingApi/Program.cs`) to tune, not a redesign.
 
 ## 4. License key format
 
@@ -281,9 +289,10 @@ decrypt any license file).
 - **Same hardware reactivating** → immediately re-approved (unless still pending) and
   the check-in cadence continues normally.
 - **Hardware fingerprint changes** (new machine, or a component swap that changes one of
-  the 4 fields) → treated as a brand-new activation attempt, which may itself land in
-  `PendingReview` again, *including on a `/checkin` call* — a checkin is not guaranteed
-  to return `Renewed`.
+  the 4 fields) → the *same* `ActivationId` re-enters `PendingReview` with the new
+  fingerprint, *including on a `/checkin` call* — a checkin is not guaranteed to return
+  `Renewed`. Keep using the `ActivationId`/`InstallGuid` you already have; nothing new
+  is issued for this case.
 - **Subscription expiry**: once `SubscriptionExpiryUtc` + `SubscriptionGraceDays` (30
   days) has passed, checkin returns `Locked` with `Reason = "SUBSCRIPTION_EXPIRED_GRACE_ENDED"`
   and no `LicenseFileBase64` — the client should stop honoring any previously cached
@@ -315,20 +324,21 @@ Request:
 }
 ```
 
-Response (`200 OK`, new install, auto-approved because no existing activation on this
-license conflicted):
+Response (`200 OK`, new install — **every** brand-new activation starts in
+`PendingReview`; the client only ever sees `Activated`/`approved` on a later
+reactivation of hardware that an admin already approved, never on the first call):
 ```json
 {
   "success": true,
-  "code": "Activated",
+  "code": "PendingReview",
   "message": null,
   "data": {
     "activationId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-    "status": "approved",
+    "status": "pending_review",
     "licenseFileBase64": "…(base64 envelope, see §5)…",
     "policy": { "checkIntervalHours": 6, "graceDays": 15, "subscriptionGraceDays": 30 },
     "subscriptionExpiryUtc": null,
-    "reviewDeadlineUtc": null,
+    "reviewDeadlineUtc": "2026-09-28T12:00:00.0000000Z",
     "reason": null
   }
 }
@@ -336,11 +346,15 @@ license conflicted):
 
 ## 8. Open items (flag to the Builder/Architect if the client tool needs them sooner)
 
-- No rate limiting on `/activate`/`/checkin` yet (tracked TODO in `ActivationController`).
-- `MaxActivationsReached` is defined but not enforced as a hard rejection (§3 note).
-- No TLS on the API today (`http://10.11.1.41:8080`, LAN-only) — the license file's own
+- No TLS on the API's own port today (`http://10.11.1.41:8080`) — the license file's own
   encryption/signature protects its *contents* in transit, but the HTTP requests
-  themselves (including the license key) are plaintext on the wire. Fine for a LAN-only
-  pilot; revisit before this API is reachable from the public internet.
+  themselves (including the license key) are plaintext between the reverse proxy and
+  the outside world unless that proxy terminates TLS. If a Cloudflare (or other)
+  reverse proxy sits in front, confirm it's TLS end-to-end (Cloudflare "Full/Full
+  strict", not "Flexible") and that it forwards a truthful `X-Forwarded-For` — the
+  rate limiter (§3) partitions on whatever client IP it reads from that header.
 - Admin-configurable `Policy` (check interval, grace days) doesn't exist yet — these
   three numbers are hard-coded constants in `ActivationService` today.
+
+Resolved since the first version of this document: rate limiting (§3) and
+`MaxActivationsReached` hard enforcement (§3) both shipped 2026-09-13.

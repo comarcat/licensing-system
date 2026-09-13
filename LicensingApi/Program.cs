@@ -1,8 +1,13 @@
 using LicensingCore.Configuration;
 using LicensingCore.Data;
+using LicensingApi.Dtos;
 using LicensingApi.Services;
+using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Cryptography;
+using System.Text.Json;
+using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -42,7 +47,39 @@ builder.Services.AddSingleton<ILicenseFileService>(new LicenseFileService(signin
 builder.Services.AddScoped<IHardwareMatchService, HardwareMatchService>();
 builder.Services.AddScoped<ActivationService>();
 
+// Per-client-IP throttle on /api/activate and /api/checkin (the only endpoints that
+// take unauthenticated, attacker-reachable input). Relies on ForwardedHeaders below to
+// see the real client IP through nginx/Cloudflare rather than the proxy's own address.
+builder.Services.AddRateLimiter(options =>
+{
+    options.AddPolicy("activation", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 30,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+            }));
+
+    options.OnRejected = async (context, ct) =>
+    {
+        context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+        context.HttpContext.Response.ContentType = "application/json";
+        var body = JsonSerializer.Serialize(ApiResult.Fail(
+            ResultCode.RateLimited, "Too many requests. Please retry after a short delay."));
+        await context.HttpContext.Response.WriteAsync(body, ct);
+    };
+});
+
 var app = builder.Build();
+
+app.UseForwardedHeaders(new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
+});
+
+app.UseRateLimiter();
 
 app.MapControllers();
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));

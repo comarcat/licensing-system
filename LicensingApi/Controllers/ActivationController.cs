@@ -1,11 +1,13 @@
 using LicensingApi.Dtos;
 using LicensingApi.Services;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace LicensingApi.Controllers;
 
 [ApiController]
 [Route("api")]
+[EnableRateLimiting("activation")]
 public class ActivationController : ControllerBase
 {
     private readonly ActivationService _service;
@@ -20,8 +22,6 @@ public class ActivationController : ControllerBase
     [HttpPost("activate")]
     public async Task<ActionResult<ApiResult>> Activate([FromBody] ActivateRequest request, CancellationToken ct)
     {
-        // TODO: rate limiting middleware (per license key / per IP) should sit in front
-        // of this endpoint before production — see design doc §7 Security Considerations.
         try
         {
             var result = await _service.ActivateAsync(request, ct);
