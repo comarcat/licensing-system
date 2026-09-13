@@ -1,12 +1,13 @@
 @inherits LayoutComponentBase
 @using LicensingAdmin.Auth
 
-<MudThemeProvider />
+<MudThemeProvider Theme="LustroTheme.Theme" IsDarkMode="true" />
+<MudPopoverProvider />
 <MudDialogProvider />
 <MudSnackbarProvider />
 
 <MudLayout>
-    <MudAppBar Elevation="1">
+    <MudAppBar Elevation="0" Class="glass-surface">
         <MudText Typo="Typo.h6">⚙ License Admin</MudText>
         <MudSpacer />
         <AuthorizeView>
@@ -19,7 +20,7 @@
             </Authorized>
         </AuthorizeView>
     </MudAppBar>
-    <MudDrawer Open="true" Elevation="0" Variant="DrawerVariant.Persistent">
+    <MudDrawer Open="true" Elevation="0" Variant="DrawerVariant.Persistent" Class="glass-surface">
         <MudNavMenu>
             <AuthorizeView Policy="@AuthPolicies.ViewerAccess">
                 <MudNavLink Href="" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dashboard">Dashboard</MudNavLink>

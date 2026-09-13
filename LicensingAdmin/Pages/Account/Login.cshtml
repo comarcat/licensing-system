@@ -11,35 +11,40 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Iniciar sesión — License Admin</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link href="~/css/site.css" rel="stylesheet" />
 </head>
 <body>
-    <main>
-        <h1>Iniciar sesión</h1>
+    <main class="auth-page">
+        <div class="auth-card">
+            <h1>Iniciar sesión</h1>
 
-        @if (Model.Error is not null)
-        {
-            <p role="alert">@Model.Error</p>
-        }
+            @if (Model.Error is not null)
+            {
+                <p role="alert" class="auth-error">@Model.Error</p>
+            }
 
-        <form method="post">
-            @Html.AntiForgeryToken()
-            <input type="hidden" name="returnUrl" value="@Model.ReturnUrl" />
+            <form method="post">
+                @Html.AntiForgeryToken()
+                <input type="hidden" name="returnUrl" value="@Model.ReturnUrl" />
 
-            <label>
-                Correo
-                <input type="email" name="Input.Email" value="@Model.Input.Email"
-                       autocomplete="username" autofocus required />
-            </label>
+                <label>
+                    Correo
+                    <input type="email" name="Input.Email" value="@Model.Input.Email"
+                           autocomplete="username" autofocus required />
+                </label>
 
-            <label>
-                Contraseña
-                <input type="password" name="Input.Password"
-                       autocomplete="current-password" required />
-            </label>
+                <label>
+                    Contraseña
+                    <input type="password" name="Input.Password"
+                           autocomplete="current-password" required />
+                </label>
 
-            <button type="submit">Entrar</button>
-        </form>
+                <button type="submit">Entrar</button>
+            </form>
+        </div>
     </main>
 </body>
 </html>
