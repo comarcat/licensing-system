@@ -38,6 +38,9 @@ dev-public.pem
 .DS_Store
 Thumbs.db
 
+# ActivationHelloWorld local test state (InstallGuid, last license file, etc.)
+hello-world-state.json
+
 # Team artefacts local
 /status.local.md
 
