@@ -1,6 +1,7 @@
 using LicensingAdmin.Auth;
 using LicensingAdmin.Licensing;
 using LicensingAdmin.Notifications;
+using LicensingAdmin.Reports;
 using LicensingAdmin.Startup;
 using LicensingCore.Configuration;
 using LicensingCore.Data;
@@ -114,6 +115,9 @@ builder.Services.AddScoped<INotificationConfigStore, EfNotificationConfigStore>(
 builder.Services.AddScoped<IEmailSender, MailKitEmailSender>();
 builder.Services.AddScoped<NotificationConfigService>();
 
+// Full licenses+activations Excel export (E3 item 5).
+builder.Services.AddScoped<LicenseExportService>();
+
 var app = builder.Build();
 
 // Must run before anything that inspects Request.Scheme/IsHttps (HSTS redirect, the
@@ -143,6 +147,19 @@ app.UseAuthorization();
 
 app.MapBlazorHub();
 app.MapFallbackToPage("/_Host");
+
+// Plain HTTP endpoint, not a Blazor component: a file download needs direct control of
+// the response (Content-Disposition), which isn't available mid-circuit. Same
+// ViewerAccess level as the screens that already show this data (Dashboard/Licenses) --
+// exporting is not a more sensitive operation than viewing it in the UI already is.
+app.MapGet("/export/licenses.xlsx", async (LicenseExportService export, CancellationToken ct) =>
+{
+    var bytes = await export.BuildWorkbookAsync(ct);
+    return Results.File(
+        bytes,
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        $"licensing-report-{DateTime.UtcNow:yyyy-MM-dd}.xlsx");
+}).RequireAuthorization(AuthPolicies.ViewerAccess);
 
 app.Run();
 
