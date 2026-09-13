@@ -19,19 +19,22 @@ Both talk to the same remote Postgres instance the Windows dev setup already use
    `dotnet-install.sh`, not apt — trixie's own .NET packaging is too new to rely on),
    `postgresql-client`, creates a `deploy` user, the `/var/www/licensing/{admin,api}`
    and `/etc/licensing-{admin,api}` directories, a self-signed TLS cert for the admin
-   vhost, and two nginx reverse-proxy vhosts (admin on `:443` TLS with `:80` redirecting
-   to it, api on `:8080` plain, both proxying to loopback-only Kestrel processes on
-   `:5000`/`:5001`). ufw is enabled with SSH + those three ports open.
+   vhost (later replaced — see "Public exposure" below), and two nginx reverse-proxy
+   vhosts (admin on `:443` TLS with `:80` redirecting to it, api originally on `:8080`
+   plain — also upgraded to TLS later — both proxying to loopback-only Kestrel
+   processes on `:5000`/`:5001`). ufw is enabled with SSH + those three ports open.
 
    **Why the admin vhost needs TLS at all on a LAN-only IP**: `LicensingAdmin`'s cookie
    auth sets `CookieSecurePolicy.Always` outside `Development` — the browser silently
    drops the auth cookie over plain HTTP, so login succeeds server-side but every
    subsequent request looks anonymous and bounces back to `/Account/Login`. A
-   self-signed cert is enough to fix this (accept the one-time browser warning); nginx
-   also sends `X-Forwarded-Proto`, and `LicensingAdmin/Program.cs` calls
-   `app.UseForwardedHeaders(...)` (added specifically for this deployment, first thing
-   after `app.Build()`) so the app correctly sees the original request as HTTPS even
-   though nginx talks to Kestrel over plain loopback HTTP.
+   self-signed cert was enough to fix this at the time (accept the one-time browser
+   warning); nginx also sends `X-Forwarded-Proto`, and `LicensingAdmin/Program.cs`
+   calls `app.UseForwardedHeaders(...)` (added specifically for this deployment, first
+   thing after `app.Build()`) so the app correctly sees the original request as HTTPS
+   even though nginx talks to Kestrel over plain loopback HTTP. **Superseded
+   2026-09-13**: both nginx vhosts now use a real Cloudflare Origin CA certificate
+   instead of the self-signed one — see "Public exposure" below.
 
 2. **Install the systemd units** (one-time, or whenever `infra/systemd/*.service` changes):
    ```bash
@@ -90,26 +93,65 @@ systemd unit definitions untouched. Safe to re-run any time.
 
 ## Live now
 
-- **Admin**: `https://10.11.1.41/` (self-signed cert — accept the browser warning once).
-  SuperAdmin `comarcat@gmail.com`.
-- **API**: `http://10.11.1.41:8080/` (plain HTTP — no cookie auth there yet, so no
-  `CookieSecurePolicy` issue; revisit if that changes).
+- **Admin**: `https://licensing.miautrix.tech/` (public) and `https://10.11.1.41/`
+  (LAN-direct, same cert). SuperAdmin `comarcat@gmail.com`.
+- **API**: `https://licensing-api.miautrix.tech/` (public) and `https://10.11.1.41:8080/`
+  (LAN-direct). Both TLS now — see "Public exposure" below; the API used to be plain
+  HTTP on 8080, upgraded 2026-09-13 alongside the public launch.
 - Both systemd units use `Type=simple`, not `Type=notify` — neither app calls
   `IHostBuilder`'s systemd integration (`UseSystemd()`)/`sd_notify`, so `Type=notify`
   just times out waiting for a readiness signal that never comes and kills a
   perfectly healthy process. If `UseSystemd()` is ever added to either `Program.cs`,
   switch the matching unit back to `Type=notify`.
 
+## Public exposure (Cloudflare Tunnel)
+
+Both apps are reachable from the public internet via a Cloudflare Tunnel
+(`cloudflared`, token-managed, running on a separate host — `proxy-cf`, 172.16.101.14 —
+not on the LXC itself). Routing (which public hostname maps to which internal
+`ip:port`) is configured entirely in the Cloudflare Zero Trust dashboard under that
+tunnel's **Public Hostname** entries — there's no local `config.yml` on `proxy-cf` to
+edit.
+
+- `licensing.miautrix.tech` → `https://10.11.1.41` (nginx, port 443)
+- `licensing-api.miautrix.tech` → `https://10.11.1.41:8080` (nginx, port 8080)
+
+**TLS end to end**: nginx on the LXC no longer uses a self-signed certificate for
+either port — both present a **Cloudflare Origin CA certificate**
+(`/etc/nginx/ssl/cloudflare-origin.{crt,key}`, SANs: `*.miautrix.tech`,
+`licensing-api.miautrix.tech`, `miautrix.tech`; valid to 2041). Cloudflare Tunnel
+(Full/strict) validates that certificate before forwarding traffic, so the whole path
+— browser/client → Cloudflare edge → tunnel → nginx → Kestrel — is encrypted, not just
+the first hop. Each Public Hostname entry sets **Origin Server Name** (under
+Additional application settings → TLS) to a hostname the Origin CA cert actually
+covers, since `cloudflared` validates the origin cert by hostname/SNI, not by the raw
+IP it dials — a cert with no IP SAN can never validate against `10.11.1.41` directly.
+
+**Gotcha if you ever add another public hostname here**: Cloudflare's free Universal
+SSL (the certificate the *edge* presents to browsers, separate from the Origin CA cert
+above) only covers **one level** of subdomain (`*.miautrix.tech`). A two-level
+hostname like `api.licensing.miautrix.tech` will never get an edge certificate on the
+free tier — Cloudflare's edge just refuses the TLS handshake outright (`SSL alert 40`,
+no cert offered), indefinitely, not as a temporary propagation delay. Either pay for
+Advanced Certificate Manager, or — the free fix used here — pick a single-level
+hostname instead (`licensing-api.miautrix.tech`, not `api.licensing.miautrix.tech`).
+
+**Rate limiting** (`LicensingApi/Program.cs`) partitions by client IP read from
+`X-Forwarded-For`; this only works correctly if the reverse proxy chain forwards a
+truthful IP the whole way through. Confirmed working end to end (Cloudflare → Tunnel →
+nginx) with a live burst test, not just by inspecting config.
+
 ## Not done yet / open items
 
-- **Real TLS cert**: currently self-signed, since the LXC is reached by LAN IP with no
-  public DNS name yet. Revisit (Let's Encrypt via certbot, or an internal CA) if this
-  becomes internet-facing or gets a real hostname.
 - **Postgres password**: per `team/inbox-arq.md` (2026-09-13), the current password
-  closely resembles the old leaked `Test2020#` and the user has deferred rotating it
-  ("proyecto va a correr en local por un tiempo") — not blocking, but the
-  `ConnectionStrings__LicensingDb` value above should be updated whenever that
-  rotation happens.
+  closely resembles the old leaked `Test2020#` and the user has deferred rotating it —
+  now more urgent since the API is publicly reachable, not just LAN-only.
 - **Backups**: `postgresql-client` is installed on the LXC for ad-hoc `pg_dump`/`psql`
   access, but there's no scheduled backup job yet (mirroring miautrix-website's
   `infra/backup.sh` pattern would be the natural next step if wanted).
+- **Origin CA certificate hygiene**: the current Origin CA certificate (with its
+  private key) was shared with the Builder in plaintext over chat while iterating on
+  the hostname/SAN setup above. The material is installed on the server and nowhere
+  else (not in git, not left in any scratch file), but if that's a concern, it's a
+  free, zero-downtime rotation from the Cloudflare dashboard (SSL/TLS → Origin
+  Server) followed by swapping the two files on the LXC.

@@ -2,10 +2,10 @@
 
 **Audience:** the developer of the client-side activation tool (DLL/EXE) that runs on
 the end customer's machine and talks to `LicensingApi`.
-**Status:** matches the code in `LicensingApi` as of 2026-09-13 (branch
-`feature/e3-usability-improvements`, on top of the merged `main`). Admin-facing
-endpoints (issue/revoke/reports) are a separate, already-built surface in
-`LicensingAdmin` — this document covers only the two endpoints the client tool calls.
+**Status:** matches the code in `LicensingApi` on `main` as of 2026-09-13 (project
+closure). Admin-facing endpoints (issue/revoke/reports) are a separate, already-built
+surface in `LicensingAdmin` — this document covers only the two endpoints the client
+tool calls.
 **Live instance:** `https://licensing-api.miautrix.tech` — public hostname, TLS
 terminated at Cloudflare's edge and re-encrypted (Cloudflare Tunnel, Full/strict) to
 nginx on the LXC, which presents a real Cloudflare Origin CA certificate on port 8080
@@ -18,8 +18,9 @@ existing wildcard, so it works with no extra cost or delay. Confirmed fully live
 working end to end (2026-09-13): `/health`, a real `/api/activate` call, the correct
 error codes for both a malformed key and a hard `MaxActivationsReached` rejection, and
 the rate limiter (§3) all verified through the actual public path — not just the LAN.
-The LAN-only address (`http://10.11.1.41:8080`, still unauthenticated/plaintext) still
-works for local testing too. See `infra/README.md`.
+The LAN-direct address (`https://10.11.1.41:8080`, same Origin CA cert, still no
+authentication on these two endpoints — that's by design, not a gap) still works for
+local testing too. See `infra/README.md`.
 
 ---
 

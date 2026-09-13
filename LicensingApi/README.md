@@ -59,9 +59,12 @@ two approaches on the same database — pick one path per environment.
 - `License.ModelSnapshot` and `MaxActivations` are copied from
   `SoftwareProduct` at issue time, so changing a product's defaults later
   never retroactively changes already-issued keys.
-- A hardware mismatch creates a **new** `Activation` row (`PendingReview`)
-  rather than mutating the existing approved one — so the full history of
-  attempts per license is preserved for the piracy-review report.
+- A hardware mismatch re-opens review on the **same** `Activation` row (new
+  fingerprint recorded, `Status` back to `PendingReview`) rather than creating
+  a second one — `(LicenseId, InstallGuid)` is UNIQUE, and the client's
+  `InstallGuid` is stable across a hardware change, so a second row could
+  never be inserted anyway (a real production bug fixed 2026-09-13 — see
+  `docs/activation-dll-integration-reference.md`).
 - `NotificationConfig.PasswordEncrypted` and `License.Signature` are `bytea`
   — never store these as plaintext strings. Use ASP.NET Core Data Protection
   (or similar) for the SMTP password, and your RSA/ECDSA signing key for
@@ -107,19 +110,29 @@ falls back to a randomly generated in-memory key pair so the app still runs
 locally — but every restart invalidates previously issued license files, so
 this fallback is dev-only and must not be used once real activations exist.
 
-### What's implemented vs. still open
+### What's implemented (as of project closure, 2026-09-13)
 
 - Key format validation, license lookup, revoked/expired checks, hardware-match
-  same-machine logic, pending-review creation with a 15-day deadline, and
-  subscription grace-period locking on check-in are all implemented.
+  same-machine logic, pending-review creation, subscription grace-period
+  locking, review-status enforcement (Rejected/Revoked activations no longer
+  renew), 15-day review-grace-deadline locking, hardware-drift re-review on
+  the same row, and a hard `MaxActivationsReached` rejection are all
+  implemented and covered by `ActivationServiceTests`/`HardwareMatchServiceTests`.
 - The license file is a pragmatic sign-then-encrypt envelope (RSA-SHA256 +
   AES-256-GCM), not full W3C XMLDSig/XMLEncrypt — see the comment in
   `LicenseFileService.cs` for the tradeoff and how to swap it if you need
   strict XMLDSig/XMLEncrypt interop.
-- Rate limiting on these endpoints is flagged as a `TODO` in the controller —
-  add ASP.NET Core's built-in rate limiting middleware before going live.
-- Admin-facing endpoints (create license, approve/reject, revoke, dashboard,
-  reports, notification config) are not built yet — that's the next slice.
+- Rate limiting is implemented: a 30 req/min fixed window per client IP on
+  both endpoints (`Microsoft.AspNetCore.RateLimiting`), returning `429`/
+  `RateLimited`.
+- Admin-facing endpoints (create license, approve/reject, revoke, archive,
+  product CRUD, dashboard, reports, notification config, self-service
+  account) are all built, in `LicensingAdmin`.
+- Both apps are publicly reachable via Cloudflare Tunnel with TLS end to end
+  (`https://licensing.miautrix.tech`, `https://licensing-api.miautrix.tech`) —
+  see `infra/README.md`.
+- `ActivationHelloWorld` (repo root) is a real Windows console client for
+  exercising this API's full lifecycle end to end; see its own README.
 
 ### Sample data
 
