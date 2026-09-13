@@ -14,10 +14,11 @@ dotnet run --project ActivationHelloWorld -- --base-url http://10.11.1.41:8080
 ```
 
 - `--base-url <url>` or `ACTIVATION_BASE_URL` env var — defaults to the LAN address.
-  Once `https://api.licensing.miautrix.tech` is fully live (Cloudflare Tunnel + Origin
-  CA cert are installed; the edge certificate for that hostname was still finishing
-  provisioning as of 2026-09-13), pass `--base-url https://api.licensing.miautrix.tech`
-  to test through the real public path instead of the LAN.
+  Once `https://licensing-api.miautrix.tech` is confirmed reachable (Cloudflare Tunnel
+  + Origin CA cert are installed; not yet re-verified through the public hostname as of
+  2026-09-13 — see `docs/activation-dll-integration-reference.md`), pass
+  `--base-url https://licensing-api.miautrix.tech` to test through the real public path
+  instead of the LAN.
 - `--aes-key-file <path>` or `ACTIVATION_AES_KEY_BASE64` env var — the symmetric AES
   key used to decrypt license files (get it out of band, never commit it; see
   `docs/activation-dll-integration-reference.md` §5.2). Without it the app still
