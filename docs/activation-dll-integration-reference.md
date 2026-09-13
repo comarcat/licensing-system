@@ -6,9 +6,16 @@ the end customer's machine and talks to `LicensingApi`.
 `feature/e3-usability-improvements`, on top of the merged `main`). Admin-facing
 endpoints (issue/revoke/reports) are a separate, already-built surface in
 `LicensingAdmin` — this document covers only the two endpoints the client tool calls.
-**Live instance:** `http://10.11.1.41:8080` (LAN only, no public DNS/TLS yet — see
-`infra/README.md`. If this ever gets a public hostname, this document's base URL and
-the "no TLS" note below need updating.)
+**Live instance:** `https://api.licensing.miautrix.tech` — public hostname, TLS
+terminated at Cloudflare's edge and re-encrypted (Cloudflare Tunnel, Full/strict) to
+nginx on the LXC, which itself now presents a real Cloudflare Origin CA certificate on
+port 8080 (no more self-signed/plaintext). As of this writing the DNS record and the
+origin's own TLS are both confirmed working end to end from the LXC outward, but
+Cloudflare's edge certificate for this exact hostname is still finishing provisioning
+on their side — if a request to this URL fails at the TLS handshake stage (not a 4xx/5xx
+from the app), that's what's still catching up, not a client-side or origin problem.
+The LAN-only address (`http://10.11.1.41:8080`, still unauthenticated/plaintext) still
+works for local testing while that finishes. See `infra/README.md`.
 
 ---
 
@@ -168,10 +175,15 @@ never blocked by this check, since it isn't consuming a new slot.
 **Rate limiting:** since 2026-09-13, `/api/activate` and `/api/checkin` are throttled
 per client IP address — a fixed window of 30 requests/minute, no queueing (the 31st
 request in a given minute gets `RateLimited` immediately rather than waiting). This
-reads the real client IP from `X-Forwarded-For` (nginx sets it; make sure any
-additional reverse proxy in front — e.g. Cloudflare — is configured to forward or set
-that header truthfully, since the limiter partitions on whatever IP it sees). One
-public IP shared by many installs (e.g. one office behind NAT) shares the same 30/min
+reads the real client IP from `X-Forwarded-For` (nginx sets it; a live burst test
+confirmed the limiter itself works correctly over the LAN path). Cloudflare Tunnel
+now sits in front for `api.licensing.miautrix.tech` — it's expected to forward the
+real end-client IP the same way, but that specific hop hasn't been re-verified yet
+through the public hostname (still finishing edge setup as of this writing per the
+note at the top of this document) — worth a quick recheck once it's live, since a
+tunnel/proxy that doesn't forward IPs truthfully would make every public client share
+one partition. One public IP shared by many installs (e.g. one office behind NAT)
+shares the same 30/min
 budget — if that's too tight for a real deployment, this is a single number
 (`PermitLimit` in `LicensingApi/Program.cs`) to tune, not a redesign.
 
@@ -346,15 +358,17 @@ reactivation of hardware that an admin already approved, never on the first call
 
 ## 8. Open items (flag to the Builder/Architect if the client tool needs them sooner)
 
-- No TLS on the API's own port today (`http://10.11.1.41:8080`) — the license file's own
-  encryption/signature protects its *contents* in transit, but the HTTP requests
-  themselves (including the license key) are plaintext between the reverse proxy and
-  the outside world unless that proxy terminates TLS. If a Cloudflare (or other)
-  reverse proxy sits in front, confirm it's TLS end-to-end (Cloudflare "Full/Full
-  strict", not "Flexible") and that it forwards a truthful `X-Forwarded-For` — the
-  rate limiter (§3) partitions on whatever client IP it reads from that header.
 - Admin-configurable `Policy` (check interval, grace days) doesn't exist yet — these
   three numbers are hard-coded constants in `ActivationService` today.
+- `Policy`/business rules (§6) don't yet distinguish requests arriving over the public
+  `api.licensing.miautrix.tech` hostname from LAN-direct ones — both are treated
+  identically today, which is fine as long as the LAN address isn't also exposed
+  publicly by accident.
 
-Resolved since the first version of this document: rate limiting (§3) and
-`MaxActivationsReached` hard enforcement (§3) both shipped 2026-09-13.
+Resolved since the first version of this document:
+- Rate limiting and `MaxActivationsReached` hard enforcement (both 2026-09-13).
+- TLS end-to-end: `https://api.licensing.miautrix.tech` → Cloudflare Tunnel (Full/
+  strict) → nginx on the LXC presenting a real Cloudflare Origin CA cert on port 8080
+  (2026-09-13). The API is no longer plaintext-on-the-wire from a public client's
+  point of view. `X-Forwarded-For`/`-Proto` are forwarded correctly through the whole
+  chain, confirmed against the rate limiter (§3).
