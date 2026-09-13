@@ -21,22 +21,48 @@ else if (_items.Count == 0)
 }
 else
 {
-    @foreach (var a in _items)
+    <MudTextField @bind-Value="_search" Immediate="true" Class="mb-4" Style="max-width:420px"
+                  Label="Buscar" Placeholder="Clave, producto, cliente o correo…"
+                  Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" />
+
+    var filtered = _items.Where(Matches).ToList();
+    @if (filtered.Count == 0)
+    {
+        <MudText Typo="Typo.body2" Color="Color.Secondary">Ningún resultado para "@_search".</MudText>
+    }
+    @foreach (var a in filtered)
     {
         <MudPaper Class="pa-4 mb-3" Elevation="1">
             @* align-center utility class instead of the non-existent MudGrid.AlignItems parameter (MUD0002). *@
             <MudGrid Class="align-center">
-                <MudItem xs="12" md="4">
+                <MudItem xs="12" md="3">
                     <MudText Typo="Typo.subtitle1">@a.License.Product.Name</MudText>
                     <MudText Typo="Typo.body2" Color="Color.Secondary" Style="font-family:monospace">
                         Key ...@Last(a.License.LicenseKey, 4)
                     </MudText>
                 </MudItem>
                 <MudItem xs="12" md="3">
+                    @if (string.IsNullOrWhiteSpace(a.License.CustomerName) && string.IsNullOrWhiteSpace(a.License.CustomerEmail))
+                    {
+                        <MudText Typo="Typo.body2" Color="Color.Secondary">Sin datos de cliente</MudText>
+                    }
+                    else
+                    {
+                        @if (!string.IsNullOrWhiteSpace(a.License.CustomerName))
+                        {
+                            <MudText Typo="Typo.body2">@a.License.CustomerName</MudText>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(a.License.CustomerEmail))
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">@a.License.CustomerEmail</MudText>
+                        }
+                    }
+                </MudItem>
+                <MudItem xs="12" md="2">
                     <MudText Typo="Typo.body2">Install: @a.InstallGuid</MudText>
                     <MudText Typo="Typo.body2" Color="Color.Secondary">Detected: @a.FirstActivatedAtUtc.ToString("yyyy-MM-dd")</MudText>
                 </MudItem>
-                <MudItem xs="12" md="3">
+                <MudItem xs="12" md="2">
                     <MudText Typo="Typo.body2" Color="Color.Warning">
                         Grace ends: @(a.ReviewDeadlineUtc?.ToString("yyyy-MM-dd") ?? "—")
                     </MudText>
@@ -59,8 +85,26 @@ else
 @code {
     private bool _loading = true;
     private List<Activation> _items = new();
+    private string _search = "";
 
     protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private bool Matches(Activation a)
+    {
+        if (string.IsNullOrWhiteSpace(_search))
+        {
+            return true;
+        }
+
+        var needle = _search.Trim();
+        return Contains(a.License.LicenseKey, needle)
+            || Contains(a.License.Product.Name, needle)
+            || Contains(a.License.CustomerName, needle)
+            || Contains(a.License.CustomerEmail, needle);
+    }
+
+    private static bool Contains(string? haystack, string needle) =>
+        !string.IsNullOrEmpty(haystack) && haystack.Contains(needle, StringComparison.OrdinalIgnoreCase);
 
     private async Task LoadAsync()
     {

@@ -1,10 +1,16 @@
-@page "/"
+@page "/dashboard"
 @using Microsoft.EntityFrameworkCore
 @using LicensingAdmin.Auth
 @attribute [Authorize(Policy = AuthPolicies.ViewerAccess)]
 @inject IDbContextFactory<AppDbContext> DbFactory
 
-<MudText Typo="Typo.h4" Class="mb-4">Dashboard</MudText>
+<div class="d-flex align-center justify-space-between mb-4">
+    <MudText Typo="Typo.h4">Dashboard</MudText>
+    <MudButton Href="/export/licenses.xlsx" Variant="Variant.Outlined" Color="Color.Secondary"
+               StartIcon="@Icons.Material.Filled.Download">
+        Exportar a Excel
+    </MudButton>
+</div>
 
 @if (_loading)
 {
@@ -38,6 +44,40 @@ else
             </MudPaper>
         </MudItem>
     </MudGrid>
+
+    <MudPaper Class="pa-4 mb-4" Elevation="1">
+        <MudText Typo="Typo.h6" Class="mb-2">Licencias por vencer (próximos 30 días)</MudText>
+        @if (_expiringSoon.Count == 0)
+        {
+            <MudText Typo="Typo.body2" Color="Color.Secondary">Ninguna licencia vence en los próximos 30 días.</MudText>
+        }
+        else
+        {
+            <MudTable Items="@_expiringSoon" Dense="true" Hover="true">
+                <HeaderContent>
+                    <MudTh>License Key</MudTh>
+                    <MudTh>Producto</MudTh>
+                    <MudTh>Cliente</MudTh>
+                    <MudTh>Vence</MudTh>
+                    <MudTh>Días restantes</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="Key"><MudText Typo="Typo.body2" Style="font-family:monospace">@context.LicenseKey</MudText></MudTd>
+                    <MudTd DataLabel="Producto">@context.Product.Name</MudTd>
+                    <MudTd DataLabel="Cliente">
+                        @(string.IsNullOrWhiteSpace(context.CustomerName) && string.IsNullOrWhiteSpace(context.CustomerEmail)
+                            ? "—"
+                            : $"{context.CustomerName} {context.CustomerEmail}".Trim())
+                    </MudTd>
+                    <MudTd DataLabel="Vence">@context.SubscriptionExpiryUtc!.Value.ToString("yyyy-MM-dd")</MudTd>
+                    <MudTd DataLabel="Días">
+                        @{ var days = (int)(context.SubscriptionExpiryUtc!.Value.Date - DateTime.UtcNow.Date).TotalDays; }
+                        <MudChip T="string" Size="Size.Small" Color="@(days <= 7 ? Color.Error : Color.Warning)">@days</MudChip>
+                    </MudTd>
+                </RowTemplate>
+            </MudTable>
+        }
+    </MudPaper>
 
     <MudGrid>
         <MudItem xs="12" md="6">
@@ -86,6 +126,7 @@ else
     private string? _topProduct;
     private List<(string Name, int Count, double Percent)> _topProducts = new();
     private List<(string OsType, int Count, double Percent)> _osBreakdown = new();
+    private List<License> _expiringSoon = new();
 
     protected override async Task OnInitializedAsync()
     {
@@ -94,6 +135,17 @@ else
         _totalActivations = await db.Activations.CountAsync();
         _activeLicenses = await db.Licenses.CountAsync(l => l.Status == LicenseStatus.Active);
         _pendingReview = await db.Activations.CountAsync(a => a.Status == ActivationStatus.PendingReview);
+
+        var today = DateTime.UtcNow.Date;
+        var horizon = today.AddDays(30);
+        _expiringSoon = await db.Licenses
+            .Include(l => l.Product)
+            .Where(l => l.Status == LicenseStatus.Active
+                && l.SubscriptionExpiryUtc != null
+                && l.SubscriptionExpiryUtc >= today
+                && l.SubscriptionExpiryUtc <= horizon)
+            .OrderBy(l => l.SubscriptionExpiryUtc)
+            .ToListAsync();
 
         var byProduct = await db.Activations
             .Include(a => a.License)

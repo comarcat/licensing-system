@@ -113,13 +113,13 @@ public class LoginModelTests
     [InlineData("user@evil.com")]
     [InlineData("null")]
     [InlineData("undefined")]
-    public void OnGet_NonLocalReturnUrl_FallsBackToRoot(string? returnUrl)
+    public void OnGet_NonLocalReturnUrl_FallsBackToDashboard(string? returnUrl)
     {
         var model = NewModel(lookupResult: null);
 
         model.OnGet(returnUrl);
 
-        Assert.Equal("/", model.ReturnUrl);
+        Assert.Equal("/dashboard", model.ReturnUrl);
     }
 
     [Theory]
@@ -151,13 +151,13 @@ public class LoginModelTests
     }
 
     [Fact]
-    public void OnGet_NoArgument_DefaultsToRoot()
+    public void OnGet_NoArgument_DefaultsToDashboard()
     {
         var model = NewModel(lookupResult: null);
 
         model.OnGet();
 
-        Assert.Equal("/", model.ReturnUrl);
+        Assert.Equal("/dashboard", model.ReturnUrl);
     }
 
     [Theory]
@@ -175,7 +175,7 @@ public class LoginModelTests
         var result = await model.OnPostAsync(returnUrl);
 
         Assert.IsType<PageResult>(result);
-        Assert.Equal("/", model.ReturnUrl);
+        Assert.Equal("/dashboard", model.ReturnUrl);
     }
 
     [Fact]
@@ -288,6 +288,6 @@ public class LoginModelTests
         var model = NewModel(lookupResult: null);
 
         Assert.Null(model.Error);
-        Assert.Equal("/", model.ReturnUrl);
+        Assert.Equal("/dashboard", model.ReturnUrl);
     }
 }

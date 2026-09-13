@@ -52,7 +52,7 @@ public class GateScreensPipelineTests
             _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
 
         [Theory]
-        [InlineData("/")]
+        [InlineData("/dashboard")]
         [InlineData("/licenses")]
         [InlineData("/pending-review")]
         public async Task Gated_screen_without_cookie_redirects_to_login(string path)

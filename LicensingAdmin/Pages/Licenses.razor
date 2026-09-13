@@ -12,10 +12,15 @@
 }
 else
 {
-    <MudTable Items="@_licenses" Hover="true" Dense="true">
+    <MudTextField @bind-Value="_search" Immediate="true" Class="mb-4" Style="max-width:420px"
+                  Label="Buscar" Placeholder="Clave, producto, cliente o correo…"
+                  Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" />
+
+    <MudTable Items="@_licenses" Hover="true" Dense="true" Filter="@(new Func<License, bool>(Matches))">
         <HeaderContent>
             <MudTh>License Key</MudTh>
             <MudTh>Product</MudTh>
+            <MudTh>Cliente</MudTh>
             <MudTh>Model</MudTh>
             <MudTh>Max Act.</MudTh>
             <MudTh>Used</MudTh>
@@ -25,6 +30,23 @@ else
         <RowTemplate>
             <MudTd DataLabel="Key"><MudText Typo="Typo.body2" Style="font-family:monospace">@context.LicenseKey</MudText></MudTd>
             <MudTd DataLabel="Product">@context.Product.Name</MudTd>
+            <MudTd DataLabel="Cliente">
+                @if (string.IsNullOrWhiteSpace(context.CustomerName) && string.IsNullOrWhiteSpace(context.CustomerEmail))
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">—</MudText>
+                }
+                else
+                {
+                    @if (!string.IsNullOrWhiteSpace(context.CustomerName))
+                    {
+                        <MudText Typo="Typo.body2">@context.CustomerName</MudText>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(context.CustomerEmail))
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">@context.CustomerEmail</MudText>
+                    }
+                }
+            </MudTd>
             <MudTd DataLabel="Model">@context.ModelSnapshot</MudTd>
             <MudTd DataLabel="Max">@context.MaxActivations</MudTd>
             <MudTd DataLabel="Used">@context.Activations.Count(a => a.Status == ActivationStatus.Approved)</MudTd>
@@ -37,7 +59,7 @@ else
     @if (_licenses.Count == 0)
     {
         <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mt-4">
-            No licenses yet — license generation from the admin UI is planned next; for now, seed one via the API or directly in the database to test this list.
+            No licenses yet — issue one from "Generar licencia".
         </MudText>
     }
 }
@@ -45,6 +67,7 @@ else
 @code {
     private bool _loading = true;
     private List<License> _licenses = new();
+    private string _search = "";
 
     protected override async Task OnInitializedAsync()
     {
@@ -56,6 +79,23 @@ else
             .ToListAsync();
         _loading = false;
     }
+
+    private bool Matches(License l)
+    {
+        if (string.IsNullOrWhiteSpace(_search))
+        {
+            return true;
+        }
+
+        var needle = _search.Trim();
+        return Contains(l.LicenseKey, needle)
+            || Contains(l.Product.Name, needle)
+            || Contains(l.CustomerName, needle)
+            || Contains(l.CustomerEmail, needle);
+    }
+
+    private static bool Contains(string? haystack, string needle) =>
+        !string.IsNullOrEmpty(haystack) && haystack.Contains(needle, StringComparison.OrdinalIgnoreCase);
 
     private static Color StatusColor(LicenseStatus status) => status switch
     {

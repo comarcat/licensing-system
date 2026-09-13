@@ -54,9 +54,20 @@ public class AuthorizationPipelineTests : IClassFixture<AuthorizationPipelineTes
     }
 
     [Fact]
-    public async Task Get_root_without_cookie_redirects_to_login()
+    public async Task Get_root_without_cookie_returns_200_public_landing_page()
     {
+        // "/" is the public welcome page ([AllowAnonymous]) — the authenticated app
+        // moved to "/dashboard" so there is somewhere anonymous to land a "start session"
+        // link on.
         var response = await AnonymousClient().GetAsync("/", TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Get_dashboard_without_cookie_redirects_to_login()
+    {
+        var response = await AnonymousClient().GetAsync("/dashboard", TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Found, response.StatusCode);
         Assert.StartsWith("/Account/Login", LocationPathAndQuery(response));
@@ -132,14 +143,14 @@ public class AuthorizationPipelineTests : IClassFixture<AuthorizationPipelineTes
     [InlineData("/\\evil.com")]
     [InlineData("javascript:alert(1)")]
     [InlineData("   /ok")]
-    public async Task Get_login_with_hostile_returnUrl_renders_root_in_hidden_field(string returnUrl)
+    public async Task Get_login_with_hostile_returnUrl_renders_dashboard_in_hidden_field(string returnUrl)
     {
         var response = await AnonymousClient()
             .GetAsync("/Account/Login?returnUrl=" + Uri.EscapeDataString(returnUrl), TestContext.Current.CancellationToken);
         var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal("/", HiddenReturnUrl(body));
+        Assert.Equal("/dashboard", HiddenReturnUrl(body));
     }
 
     [Theory]

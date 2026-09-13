@@ -1,0 +1,155 @@
+@page "/account/profile"
+@using LicensingAdmin.Auth
+@attribute [Authorize(Policy = AuthPolicies.ViewerAccess)]
+@inject AdminUserService Admins
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+@inject ILoggerFactory LoggerFactory
+
+<MudText Typo="Typo.h4" Class="mb-1">Mi cuenta</MudText>
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+    Cambia tu correo o contraseña. Ambos requieren tu contraseña actual.
+</MudText>
+
+<MudPaper Class="pa-4 mb-6" Elevation="1" MaxWidth="480px">
+    <MudText Typo="Typo.subtitle1" Class="mb-2">Correo actual</MudText>
+    <MudText Typo="Typo.body1" Class="mb-4" Style="font-family:monospace">@_currentEmail</MudText>
+
+    <MudTextField @bind-Value="_newEmail" Label="Nuevo correo" InputType="InputType.Email"
+                  MaxLength="320" Immediate="true" Class="mb-2" />
+    <MudTextField @bind-Value="_emailCurrentPassword" Label="Contraseña actual" InputType="InputType.Password"
+                  Immediate="true" Class="mb-4" />
+    <MudButton OnClick="ChangeEmailAsync" Variant="Variant.Filled" Color="Color.Primary"
+               Disabled="@_busy" StartIcon="@Icons.Material.Filled.AlternateEmail">
+        @(_busy ? "Guardando…" : "Cambiar correo")
+    </MudButton>
+</MudPaper>
+
+<MudPaper Class="pa-4 mb-6" Elevation="1" MaxWidth="480px">
+    <MudText Typo="Typo.subtitle1" Class="mb-2">Cambiar contraseña</MudText>
+    <MudTextField @bind-Value="_currentPassword" Label="Contraseña actual" InputType="InputType.Password"
+                  Immediate="true" Class="mb-2" />
+    <MudTextField @bind-Value="_newPassword" Label="Contraseña nueva" InputType="InputType.Password"
+                  Immediate="true" Class="mb-2" HelperText="Mínimo 12 caracteres." />
+    <MudTextField @bind-Value="_confirmPassword" Label="Confirmar contraseña nueva" InputType="InputType.Password"
+                  Immediate="true" Class="mb-4" />
+    <MudButton OnClick="ChangePasswordAsync" Variant="Variant.Filled" Color="Color.Primary"
+               Disabled="@_busy" StartIcon="@Icons.Material.Filled.Lock">
+        @(_busy ? "Guardando…" : "Cambiar contraseña")
+    </MudButton>
+</MudPaper>
+
+@code {
+    private const int PasswordFloor = 12;
+
+    private ILogger Logger => LoggerFactory.CreateLogger("LicensingAdmin.Pages.Account.Profile");
+
+    private bool _busy;
+    private string _currentEmail = "";
+    private Guid _currentId;
+
+    private string? _newEmail;
+    private string? _emailCurrentPassword;
+
+    private string? _currentPassword;
+    private string? _newPassword;
+    private string? _confirmPassword;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthState.GetAuthenticationStateAsync()).User;
+        _currentEmail = CurrentAdmin.Email(user);
+
+        var admins = await Admins.ListAsync();
+        var mine = admins.FirstOrDefault(a =>
+            string.Equals(a.Email, _currentEmail, StringComparison.OrdinalIgnoreCase));
+        if (mine is not null)
+        {
+            _currentId = mine.Id;
+        }
+    }
+
+    private async Task ChangeEmailAsync()
+    {
+        if (_busy) return;
+
+        if (string.IsNullOrWhiteSpace(_newEmail) || string.IsNullOrWhiteSpace(_emailCurrentPassword))
+        {
+            Snackbar.Add("Nuevo correo y contraseña actual son obligatorios.", Severity.Warning);
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            await Admins.ChangeOwnEmailAsync(_currentId, _newEmail, _emailCurrentPassword);
+            Snackbar.Add("Correo actualizado. Vuelve a iniciar sesión con el nuevo correo.", Severity.Success);
+            // The signed-in cookie still names the OLD email; force a fresh login rather
+            // than leaving a circuit alive against a now-stale claim.
+            Nav.NavigateTo("/Account/Logout", forceLoad: true);
+        }
+        catch (WrongPasswordException)
+        {
+            Snackbar.Add("Contraseña actual incorrecta.", Severity.Warning);
+        }
+        catch (AdminEmailTakenException)
+        {
+            Snackbar.Add("Ya existe un administrador con ese correo.", Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning("Self-service email change failed for {Id}: {Error}.", _currentId, ex.GetType().Name);
+            Snackbar.Add("No se pudo cambiar el correo. Inténtalo de nuevo.", Severity.Error);
+        }
+        finally
+        {
+            _emailCurrentPassword = null;
+            _busy = false;
+        }
+    }
+
+    private async Task ChangePasswordAsync()
+    {
+        if (_busy) return;
+
+        if (string.IsNullOrWhiteSpace(_currentPassword) || string.IsNullOrWhiteSpace(_newPassword))
+        {
+            Snackbar.Add("Contraseña actual y nueva son obligatorias.", Severity.Warning);
+            return;
+        }
+        if (_newPassword.Length < PasswordFloor)
+        {
+            Snackbar.Add($"La contraseña nueva debe tener al menos {PasswordFloor} caracteres.", Severity.Warning);
+            return;
+        }
+        if (!string.Equals(_newPassword, _confirmPassword, StringComparison.Ordinal))
+        {
+            Snackbar.Add("Las contraseñas nuevas no coinciden.", Severity.Warning);
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            await Admins.ChangeOwnPasswordAsync(_currentId, _currentPassword, _newPassword);
+            Snackbar.Add("Contraseña actualizada.", Severity.Success);
+        }
+        catch (WrongPasswordException)
+        {
+            Snackbar.Add("Contraseña actual incorrecta.", Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning("Self-service password change failed for {Id}: {Error}.", _currentId, ex.GetType().Name);
+            Snackbar.Add("No se pudo cambiar la contraseña. Inténtalo de nuevo.", Severity.Error);
+        }
+        finally
+        {
+            _currentPassword = null;
+            _newPassword = null;
+            _confirmPassword = null;
+            _busy = false;
+        }
+    }
+}

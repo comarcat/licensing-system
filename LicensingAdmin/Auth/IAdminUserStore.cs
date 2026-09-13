@@ -33,6 +33,23 @@ public interface IAdminUserStore
     /// <paramref name="user"/> plus <paramref name="audit"/> in one transaction.
     /// </summary>
     Task SetActiveAsync(AdminUser user, AuditLogEntry audit, CancellationToken ct = default);
+
+    /// <summary>
+    /// Persists a new <see cref="AdminUser.PasswordHash"/> on an already-loaded
+    /// <paramref name="user"/> plus <paramref name="audit"/> in one transaction.
+    /// </summary>
+    Task UpdatePasswordAsync(AdminUser user, string newHash, AuditLogEntry audit, CancellationToken ct = default);
+
+    /// <summary>
+    /// Persists a new, already-normalised <see cref="AdminUser.Email"/> on an
+    /// already-loaded <paramref name="user"/> plus <paramref name="audit"/> in one
+    /// transaction.
+    /// </summary>
+    /// <exception cref="AdminEmailTakenException">
+    /// <paramref name="newNormalizedEmail"/> collides with another admin's email
+    /// (translated from the store's unique-index violation).
+    /// </exception>
+    Task UpdateEmailAsync(AdminUser user, string newNormalizedEmail, AuditLogEntry audit, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -91,5 +108,34 @@ public sealed class EfAdminUserStore(IDbContextFactory<AppDbContext> factory) : 
         db.AdminUsers.Attach(user).Property(u => u.IsActive).IsModified = true;
         db.AuditLogEntries.Add(audit);
         await db.SaveChangesAsync(ct);
+    }
+
+    /// <inheritdoc />
+    public async Task UpdatePasswordAsync(AdminUser user, string newHash, AuditLogEntry audit, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        db.AdminUsers.Attach(user);
+        user.PasswordHash = newHash;
+        db.Entry(user).Property(u => u.PasswordHash).IsModified = true;
+        db.AuditLogEntries.Add(audit);
+        await db.SaveChangesAsync(ct);
+    }
+
+    /// <inheritdoc />
+    public async Task UpdateEmailAsync(AdminUser user, string newNormalizedEmail, AuditLogEntry audit, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        db.AdminUsers.Attach(user);
+        user.Email = newNormalizedEmail;
+        db.Entry(user).Property(u => u.Email).IsModified = true;
+        db.AuditLogEntries.Add(audit);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException e) when ((e.InnerException as PostgresException)?.SqlState == "23505")
+        {
+            throw new AdminEmailTakenException(newNormalizedEmail);
+        }
     }
 }

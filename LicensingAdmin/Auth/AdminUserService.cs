@@ -118,6 +118,77 @@ public sealed class AdminUserService(IAdminUserStore store, PasswordHasherServic
     /// <summary>Every admin, for the screen.</summary>
     public Task<IReadOnlyList<AdminUser>> ListAsync(CancellationToken ct = default) => store.ListAsync(ct);
 
+    /// <summary>
+    /// Self-service password change: verifies <paramref name="currentPassword"/> against
+    /// <paramref name="id"/>'s stored hash before writing <paramref name="newPassword"/>'s
+    /// hash. Does not touch the signed-in cookie — the password is not itself a claim, so
+    /// the current session stays valid; only a future login needs the new password.
+    /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="newPassword"/> is shorter than <see cref="MinTempPasswordLength"/>.</exception>
+    /// <exception cref="InvalidOperationException">No admin with <paramref name="id"/>.</exception>
+    /// <exception cref="WrongPasswordException"><paramref name="currentPassword"/> does not match.</exception>
+    public async Task ChangeOwnPasswordAsync(
+        Guid id, string currentPassword, string newPassword, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(newPassword);
+        if (newPassword.Length < MinTempPasswordLength)
+        {
+            throw new ArgumentException(
+                $"New password must be at least {MinTempPasswordLength} characters.", nameof(newPassword));
+        }
+
+        var user = await store.FindByIdAsync(id, ct)
+            ?? throw new InvalidOperationException($"No admin user with id '{id}'.");
+
+        if (!hasher.Verify(user.PasswordHash, currentPassword ?? string.Empty))
+        {
+            throw new WrongPasswordException();
+        }
+
+        var audit = Audit(user.Email, user.Id, "Updated");
+        audit.DetailsJson = JsonSerializer.Serialize(new { field = "password" });
+        await store.UpdatePasswordAsync(user, hasher.Hash(newPassword), audit, ct);
+    }
+
+    /// <summary>
+    /// Self-service email change: verifies <paramref name="currentPassword"/> against
+    /// <paramref name="id"/>'s stored hash before writing the normalised
+    /// <paramref name="newEmail"/>. The signed-in cookie still carries the OLD email as
+    /// its name claim — the caller must sign the user out immediately after this succeeds
+    /// (the next request's principal revalidation would otherwise fail the lookup anyway,
+    /// since it looks up by the now-stale claim).
+    /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="newEmail"/> is null/blank.</exception>
+    /// <exception cref="InvalidOperationException">No admin with <paramref name="id"/>.</exception>
+    /// <exception cref="WrongPasswordException"><paramref name="currentPassword"/> does not match.</exception>
+    /// <exception cref="AdminEmailTakenException">Another admin already has that email.</exception>
+    public async Task<string> ChangeOwnEmailAsync(
+        Guid id, string newEmail, string currentPassword, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(newEmail);
+
+        var user = await store.FindByIdAsync(id, ct)
+            ?? throw new InvalidOperationException($"No admin user with id '{id}'.");
+
+        if (!hasher.Verify(user.PasswordHash, currentPassword ?? string.Empty))
+        {
+            throw new WrongPasswordException();
+        }
+
+        var normalized = NormalizeEmail(newEmail);
+        if (!string.Equals(normalized, user.Email, StringComparison.Ordinal)
+            && await store.EmailExistsAsync(normalized, ct))
+        {
+            throw new AdminEmailTakenException(normalized);
+        }
+
+        var oldEmail = user.Email;
+        var audit = Audit(oldEmail, user.Id, "Updated");
+        audit.DetailsJson = JsonSerializer.Serialize(new { field = "email" });
+        await store.UpdateEmailAsync(user, normalized, audit, ct);
+        return normalized;
+    }
+
     private static AuditLogEntry Audit(string actor, Guid adminId, string action) => new()
     {
         Id = Guid.NewGuid(),
@@ -141,3 +212,10 @@ public sealed class AdminEmailTakenException(string normalizedEmail)
 /// panel out — the last active SuperAdmin, or the actor deactivating their own account.
 /// </summary>
 public sealed class LastSuperAdminException(string message) : InvalidOperationException(message);
+
+/// <summary>
+/// Thrown by <see cref="AdminUserService.ChangeOwnPasswordAsync"/> and
+/// <see cref="AdminUserService.ChangeOwnEmailAsync"/> when the supplied current password
+/// does not match the stored hash.
+/// </summary>
+public sealed class WrongPasswordException() : InvalidOperationException("Current password is incorrect.");

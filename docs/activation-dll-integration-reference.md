@@ -1,0 +1,346 @@
+# Licensing API — Activation Client Integration Reference
+
+**Audience:** the developer of the client-side activation tool (DLL/EXE) that runs on
+the end customer's machine and talks to `LicensingApi`.
+**Status:** matches the code in `LicensingApi` as of 2026-09-13 (branch
+`feature/e3-usability-improvements`, on top of the merged `main`). Admin-facing
+endpoints (issue/revoke/reports) are a separate, already-built surface in
+`LicensingAdmin` — this document covers only the two endpoints the client tool calls.
+**Live instance:** `http://10.11.1.41:8080` (LAN only, no public DNS/TLS yet — see
+`infra/README.md`. If this ever gets a public hostname, this document's base URL and
+the "no TLS" note below need updating.)
+
+---
+
+## 1. Overview
+
+The client tool activates a license key once per machine, then periodically checks in.
+Both operations return a **signed, encrypted license file** the client persists locally
+and re-validates offline between check-ins. The server never trusts the client's local
+state — every check-in re-derives the outcome from the database.
+
+```
+Client tool                          LicensingApi
+    |  POST /api/activate                 |
+    |------------------------------------>|
+    |  <-- ApiResult { LicenseFileBase64 }|
+    |                                     |
+    |  (periodically, per Policy.CheckIntervalHours)
+    |  POST /api/checkin                  |
+    |------------------------------------>|
+    |  <-- ApiResult { LicenseFileBase64 }|
+```
+
+## 2. Endpoints
+
+### `POST /api/activate`
+
+Called once, the first time the software runs on a machine (or again if the machine's
+hardware fingerprint no longer matches any activation on record for this key).
+
+**Request body** (`application/json`):
+
+```csharp
+public class ActivateRequest
+{
+    public required string LicenseKey { get; set; }        // "XXXX-XXXXX-XXXX-XXXX-XXXX-XXXX-XX"
+    public required Guid InstallGuid { get; set; }          // generated ONCE by the client, persisted locally
+    public required HardwareInfo Hardware { get; set; }
+    public VmInfo? Vm { get; set; }                          // optional
+    public string? AppVersion { get; set; }                  // optional, informational
+    public DateTime ClientTimestampUtc { get; set; }
+}
+
+public class HardwareInfo
+{
+    public required string CpuId { get; set; }
+    public required string MotherboardSerial { get; set; }
+    public required string TpmId { get; set; }
+    public required string MacAddressPrimary { get; set; }
+    public string? OsType { get; set; }                       // informational only
+    public string? OsVersion { get; set; }                    // informational only
+    public string? CpuModel { get; set; }                     // informational only
+    public int? RamGb { get; set; }                           // informational only
+}
+
+public class VmInfo
+{
+    public bool HypervisorPresent { get; set; }
+    public List<string> Signals { get; set; } = new();        // free-text signal names, e.g. "hypervisor_bit"
+}
+```
+
+**The 4 required `HardwareInfo` fields are the entire "same machine" identity.** The
+server does an exact string match on all four together — no fuzzy matching, no partial
+credit. If your tool cannot read one of them reliably on some hardware, populate it with
+a stable placeholder rather than an empty string (an empty string still participates in
+the exact match and is valid, just make sure it's *consistently* empty on that machine
+across activations, not sometimes-empty).
+
+### `POST /api/checkin`
+
+Called periodically per `Policy.CheckIntervalHours` from the last activate/checkin
+response (currently always 6 hours — `DefaultCheckIntervalHours` in `ActivationService`).
+
+```csharp
+public class CheckinRequest
+{
+    public required Guid ActivationId { get; set; }          // from the previous activate/checkin response
+    public required Guid InstallGuid { get; set; }            // must match what was sent at activation
+    public required HardwareInfo Hardware { get; set; }
+    public VmInfo? Vm { get; set; }
+    public string? LastLocalStatus { get; set; }               // optional, informational
+    public DateTime ClientTimestampUtc { get; set; }
+}
+```
+
+**If the hardware no longer matches** what's on record for this `ActivationId`, the
+server transparently re-runs the `/activate` flow internally (same rules as a fresh
+activation attempt, including possibly creating a new `PendingReview` activation) — so
+a checkin on drifted hardware can come back `pending_review` even though the client
+only asked to check in.
+
+### `GET /health`
+
+No auth, no body. Returns `{"status":"ok"}`. Use this for connectivity probes only —
+it says nothing about license state.
+
+## 3. Response envelope
+
+Every endpoint returns the same wrapper, with the appropriate HTTP status code:
+
+```csharp
+public class ApiResult
+{
+    public bool Success { get; set; }
+    public required ResultCode Code { get; set; }
+    public string? Message { get; set; }              // present on failures, human-readable
+    public ActivationResultData? Data { get; set; }    // present on success
+}
+
+public class ActivationResultData
+{
+    public Guid? ActivationId { get; set; }
+    public string Status { get; set; } = "";           // "approved" | "pending_review" | "locked" | "rejected"
+    public string? LicenseFileBase64 { get; set; }     // see §4 — absent when Status == "locked"
+    public PolicyDto? Policy { get; set; }
+    public DateTime? SubscriptionExpiryUtc { get; set; }
+    public DateTime? ReviewDeadlineUtc { get; set; }    // set only while Status == "pending_review"
+    public string? Reason { get; set; }                 // machine-readable detail, e.g. "SUBSCRIPTION_EXPIRED_GRACE_ENDED"
+}
+
+public class PolicyDto
+{
+    public int CheckIntervalHours { get; set; }         // currently always 6
+    public int GraceDays { get; set; }                  // currently always 15 (pending-review deadline)
+    public int SubscriptionGraceDays { get; set; }       // currently always 30
+}
+```
+
+### Result codes → HTTP status
+
+| `ResultCode`             | HTTP | Meaning |
+|---|---|---|
+| `Activated`              | 200 | New or reactivated, approved immediately |
+| `PendingReview`          | 200 | New install, awaiting admin approval (up to `GraceDays`) |
+| `Renewed`                | 200 | Checkin succeeded, license file refreshed |
+| `Locked`                 | 200 | Checkin succeeded but the license is now locked — see `Reason` |
+| `InvalidKeyFormat`       | 400 | `LicenseKey` fails the format regex (§5) |
+| `LicenseNotFound`        | 404 | No license row for that key |
+| `ActivationNotFound`     | 404 | Checkin: unknown `ActivationId` |
+| `LicenseExpired`         | 403 | License row's own `Status` is `Expired` |
+| `LicenseRevoked`         | 403 | License row's own `Status` is `Revoked` |
+| `InstallGuidMismatch`    | 403 | Checkin: `InstallGuid` doesn't match the activation record |
+| `MaxActivationsReached`  | 409 | Informational only today — see note below |
+| `RateLimited`            | 429 | Reserved; **rate limiting is not implemented yet** (tracked as a TODO in `ActivationController`) |
+| `ServerError`            | 500 | Unhandled exception; retry with backoff |
+
+**Note on `MaxActivationsReached`:** as implemented today, exceeding
+`License.MaxActivations` does **not** reject the activation — it still creates a
+`PendingReview` activation and adds a note for the reviewer ("Max activations already
+reached; review carefully"). The 409 status/code above is defined but not currently
+returned by `ActivateAsync`; don't rely on the API rejecting over-limit activations by
+itself. This is worth flagging to the Architect/Builder if the client tool needs a hard
+enforcement, since today it is enforced only by human review policy.
+
+Known limitation: an unauthenticated client can call `/api/activate` and `/api/checkin`
+with no rate limiting today. If the client tool retries aggressively on failure, throttle
+client-side until the server-side TODO is addressed.
+
+## 4. License key format
+
+```
+^[A-Z0-9]{4}-[A-Z0-9]{5}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{2}$
+```
+Example: `BRCX-IH9BC-X9ZV-KQXC-2NLY-CO03-8P` (4-5-4-4-4-4-2 groups, uppercase
+alphanumeric, hyphen-separated). Validate client-side before calling `/activate` to
+avoid a round trip for an obviously malformed key.
+
+## 5. The license file (`LicenseFileBase64`)
+
+This is what the client tool must decrypt and verify, then trust for offline operation
+between check-ins. It is **not** a JWT and **not** standard XMLDSig/XMLEncrypt — it's a
+deliberately simple sign-then-encrypt envelope (see the comment at the top of
+`LicensingApi/Services/LicenseFileService.cs` if the server side ever needs to change
+this).
+
+### 5.1 Byte layout (after base64-decoding `LicenseFileBase64`)
+
+```
+[ 12 bytes: AES-GCM nonce ] [ 16 bytes: AES-GCM auth tag ] [ N bytes: ciphertext ]
+```
+
+### 5.2 Decrypt
+
+- Algorithm: **AES-256-GCM**.
+- Key: the 32-byte AES key configured server-side as `Crypto:AesKeyBase64` — **this key
+  must be shared with the client tool out of band** (it is symmetric, so it cannot be
+  embedded in a way that's safe from extraction from the binary; treat this the same way
+  you'd treat any embedded symmetric secret — obfuscation, not real secrecy, is the best
+  a client-side key can offer). Decrypting `ciphertext` with `nonce`/`tag` yields the
+  **signed XML document** (UTF-8 bytes) described next.
+
+### 5.3 The signed XML document
+
+Once decrypted, you have UTF-8 bytes of XML shaped exactly like this (element order
+matters if you need to reproduce the canonicalization for signature verification):
+
+```xml
+<LicenseActivation xmlns="urn:licensing:v1">
+  <LicenseKey>BRCX-IH9BC-X9ZV-KQXC-2NLY-CO03-8P</LicenseKey>
+  <ActivationId>3fa85f64-5717-4562-b3fc-2c963f66afa6</ActivationId>
+  <InstallGuid>...</InstallGuid>
+  <Status>approved</Status>
+  <Hardware>
+    <CpuId>...</CpuId>
+    <MotherboardSerial>...</MotherboardSerial>
+    <TpmId>...</TpmId>
+    <MacAddressPrimary>...</MacAddressPrimary>
+  </Hardware>
+  <Policy>
+    <CheckIntervalHours>6</CheckIntervalHours>
+    <GraceDays>15</GraceDays>
+    <SubscriptionGraceDays>30</SubscriptionGraceDays>
+  </Policy>
+  <SubscriptionExpiryUtc>2027-01-01T00:00:00.0000000Z</SubscriptionExpiryUtc>
+  <IssuedAtUtc>2026-09-13T12:00:00.0000000Z</IssuedAtUtc>
+  <Signature>base64-RSA-signature</Signature>
+</LicenseActivation>
+```
+
+`SubscriptionExpiryUtc` is an empty element (`<SubscriptionExpiryUtc></SubscriptionExpiryUtc>`)
+when the license has no subscription expiry (perpetual/machine-model licenses).
+Both date fields use .NET's round-trip ("O") format.
+
+### 5.4 Verify the signature
+
+1. Take the decrypted XML **exactly as received**, remove the `<Signature>` element,
+   and re-serialize with **no indentation/formatting** (.NET's
+   `XElement.ToString(SaveOptions.DisableFormatting)` — the signature was computed over
+   this exact byte form; any added/removed whitespace, reordered attributes, or changed
+   line endings will make verification fail even though the content is "the same").
+2. Get the UTF-8 bytes of that canonical (Signature-less) XML.
+3. Verify with **RSA-SHA256, PKCS#1 v1.5 padding** against those bytes, using the
+   base64 content of the `<Signature>` element as the signature and the public key
+   below.
+4. If verification fails, treat the license file as tampered — do not honor `Status`,
+   `SubscriptionExpiryUtc`, or anything else in it.
+
+### 5.5 Public key (safe to embed in the client — this is the public half only)
+
+```
+-----BEGIN PUBLIC KEY-----
+MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAt6fBjOqh1XA5RCBl/feB
+ogm6Hn/ZZSBWv/10PjavfquYPq6+IYckg03bnBzzUeELj3LvWjAunOfgJ3qQ3OsW
+Pij0e76FLmb4EJbUTTe/ycKDKPjwG0mtWHRt7tmav+NzsxuBuTVC6vN4Tzxzyhvf
+Z6i8l3sfljy/9boxSkbxBAlvL2ZwYVT0ukD00xm4Ycx0l+D3PRDLdGGEsCqrT3cO
+iZ5XOxVYve8eddD0eMPUGFw69MfSKleZzSrhMDmieMXZWomU0AAjA5X2fuXZfN89
+THwiGD6Q/Pxil99Hh4Hm+9+oj9K+nu7kJqxTNNVB/tp9HJD67xqdIWs7VQoJCPDw
+DOE4uwy/frvp8xvcahDcyTUJ5AkD3sk6/UlamHddsdQWT6iT5D3jqybcjjmpHnuC
+SGqzcz+0joqlakzmRQUhWlA7EhANELZvBFI2Iz/wABkSFGpNsdqOzRNvOobUnxk9
+N+0hXYgWO0XYb0ay0BqosLLAvRYElioZyDMVKkGR4Xh7AgMBAAE=
+-----END PUBLIC KEY-----
+```
+(3072-bit RSA. Corresponds to the private key currently deployed on `10.11.1.41` for
+both `LicensingApi` and `LicensingAdmin` — see `team/inbox-arq.md`, 2026-09-13. If this
+key is ever rotated, every `LicenseFileBase64` signed with the old key stops verifying;
+plan a rotation as a coordinated release, not a silent config change.)
+
+**The symmetric AES key is not published in this document** — request it through a
+secure, out-of-band channel (it lives only in the server's `/etc/licensing-api/env`,
+never in git). Unlike the RSA key, this one must stay confidential since it's used for
+both directions (only the server encrypts today, but anyone with the AES key can
+decrypt any license file).
+
+## 6. Business rules the client should anticipate
+
+- **New install, no hardware match on record** → `PendingReview`. `ReviewDeadlineUtc` is
+  15 days out. The license file's `Status` will be `pending_review` in this window —
+  the client tool should decide its own local grace-period UX (e.g., run in a limited
+  mode) rather than blocking entirely, since a human has up to 15 days to approve it.
+- **Same hardware reactivating** → immediately re-approved (unless still pending) and
+  the check-in cadence continues normally.
+- **Hardware fingerprint changes** (new machine, or a component swap that changes one of
+  the 4 fields) → treated as a brand-new activation attempt, which may itself land in
+  `PendingReview` again, *including on a `/checkin` call* — a checkin is not guaranteed
+  to return `Renewed`.
+- **Subscription expiry**: once `SubscriptionExpiryUtc` + `SubscriptionGraceDays` (30
+  days) has passed, checkin returns `Locked` with `Reason = "SUBSCRIPTION_EXPIRED_GRACE_ENDED"`
+  and no `LicenseFileBase64` — the client should stop honoring any previously cached
+  license file at that point regardless of what it says locally.
+- **Revoked license**: any checkin against a revoked license returns `Locked` with
+  `Reason = "LICENSE_REVOKED"`, no license file.
+- **Perpetual licenses** (no `SubscriptionExpiryUtc`) never lock on subscription grounds
+  — only revocation locks them.
+
+## 7. Sample activate request/response
+
+Request:
+```json
+{
+  "licenseKey": "BRCX-IH9BC-X9ZV-KQXC-2NLY-CO03-8P",
+  "installGuid": "8b1e6f2a-1111-2222-3333-000000000001",
+  "hardware": {
+    "cpuId": "BFEBFBFF000A0655",
+    "motherboardSerial": "MB-9F21-0001",
+    "tpmId": "TPM-0001",
+    "macAddressPrimary": "00:1A:2B:3C:4D:5E",
+    "osType": "Windows 11 Pro",
+    "osVersion": "10.0.26100",
+    "cpuModel": "Intel Core i7-13700",
+    "ramGb": 32
+  },
+  "appVersion": "1.4.2",
+  "clientTimestampUtc": "2026-09-13T12:00:00Z"
+}
+```
+
+Response (`200 OK`, new install, auto-approved because no existing activation on this
+license conflicted):
+```json
+{
+  "success": true,
+  "code": "Activated",
+  "message": null,
+  "data": {
+    "activationId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+    "status": "approved",
+    "licenseFileBase64": "…(base64 envelope, see §5)…",
+    "policy": { "checkIntervalHours": 6, "graceDays": 15, "subscriptionGraceDays": 30 },
+    "subscriptionExpiryUtc": null,
+    "reviewDeadlineUtc": null,
+    "reason": null
+  }
+}
+```
+
+## 8. Open items (flag to the Builder/Architect if the client tool needs them sooner)
+
+- No rate limiting on `/activate`/`/checkin` yet (tracked TODO in `ActivationController`).
+- `MaxActivationsReached` is defined but not enforced as a hard rejection (§3 note).
+- No TLS on the API today (`http://10.11.1.41:8080`, LAN-only) — the license file's own
+  encryption/signature protects its *contents* in transit, but the HTTP requests
+  themselves (including the license key) are plaintext on the wire. Fine for a LAN-only
+  pilot; revisit before this API is reachable from the public internet.
+- Admin-configurable `Policy` (check interval, grace days) doesn't exist yet — these
+  three numbers are hard-coded constants in `ActivationService` today.

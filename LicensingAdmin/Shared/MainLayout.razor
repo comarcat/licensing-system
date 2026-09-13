@@ -13,6 +13,10 @@
         <AuthorizeView>
             <Authorized>
                 <MudText Typo="Typo.body2" Class="mr-4">@context.User.Identity?.Name</MudText>
+                <MudButton Href="/account/profile" Variant="Variant.Text" Color="Color.Inherit"
+                           StartIcon="@Icons.Material.Filled.AccountCircle" Size="Size.Small" Class="mr-2">
+                    Mi cuenta
+                </MudButton>
                 <MudButton Href="/Account/Logout" Variant="Variant.Text" Color="Color.Inherit"
                            StartIcon="@Icons.Material.Filled.Logout" Size="Size.Small">
                     Cerrar sesión
@@ -23,7 +27,7 @@
     <MudDrawer Open="true" Elevation="0" Variant="DrawerVariant.Persistent" Class="glass-surface">
         <MudNavMenu>
             <AuthorizeView Policy="@AuthPolicies.ViewerAccess">
-                <MudNavLink Href="" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dashboard">Dashboard</MudNavLink>
+                <MudNavLink Href="dashboard" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dashboard">Dashboard</MudNavLink>
             </AuthorizeView>
             <AuthorizeView Policy="@AuthPolicies.ViewerAccess">
                 <MudNavLink Href="licenses" Icon="@Icons.Material.Filled.VpnKey">Licencias</MudNavLink>
@@ -36,6 +40,9 @@
             </AuthorizeView>
             <AuthorizeView Policy="@AuthPolicies.AdminUserAccess">
                 <MudNavLink Href="admin/users" Icon="@Icons.Material.Filled.ManageAccounts">Usuarios admin</MudNavLink>
+            </AuthorizeView>
+            <AuthorizeView Policy="@AuthPolicies.AdminUserAccess">
+                <MudNavLink Href="admin/notifications" Icon="@Icons.Material.Filled.Email">Correo (SMTP)</MudNavLink>
             </AuthorizeView>
         </MudNavMenu>
     </MudDrawer>

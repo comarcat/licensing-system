@@ -47,6 +47,25 @@ public class AdminUserServiceTests
             Writes++;
             return Task.CompletedTask;
         }
+
+        public Task UpdatePasswordAsync(AdminUser user, string newHash, AuditLogEntry audit, CancellationToken ct = default)
+        {
+            user.PasswordHash = newHash;
+            Writes++;
+            return Task.CompletedTask;
+        }
+
+        public Task UpdateEmailAsync(AdminUser user, string newNormalizedEmail, AuditLogEntry audit, CancellationToken ct = default)
+        {
+            if (ExistingEmails.Any(e => string.Equals(e, newNormalizedEmail, StringComparison.OrdinalIgnoreCase))
+                && !string.Equals(user.Email, newNormalizedEmail, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new AdminEmailTakenException(newNormalizedEmail);
+            }
+            user.Email = newNormalizedEmail;
+            Writes++;
+            return Task.CompletedTask;
+        }
     }
 
     private static AdminUser Row(string email, bool active = true) => new()
@@ -194,6 +213,130 @@ public class AdminUserServiceTests
             () => svc.SetActiveAsync(row.Id, isActive: false, "  ", Ct));
 
         Assert.Equal(0, store.Writes);
+    }
+
+    // ---- ChangeOwnPasswordAsync --------------------------------------------
+
+    [Fact]
+    public async Task ChangeOwnPasswordAsync_verifies_current_password_and_hashes_the_new_one()
+    {
+        var hasher = Hasher();
+        var row = Row("who@vendor.test");
+        row.PasswordHash = hasher.Hash("old-password-123");
+        var store = new FakeStore { Rows = { row } };
+        var svc = new AdminUserService(store, hasher);
+
+        await svc.ChangeOwnPasswordAsync(row.Id, "old-password-123", "new-password-456", Ct);
+
+        Assert.Equal(1, store.Writes);
+        Assert.True(hasher.Verify(row.PasswordHash, "new-password-456"));
+        Assert.False(hasher.Verify(row.PasswordHash, "old-password-123"));
+    }
+
+    [Fact]
+    public async Task ChangeOwnPasswordAsync_wrong_current_password_throws_and_writes_nothing()
+    {
+        var hasher = Hasher();
+        var row = Row("who@vendor.test");
+        row.PasswordHash = hasher.Hash("old-password-123");
+        var store = new FakeStore { Rows = { row } };
+        var svc = new AdminUserService(store, hasher);
+
+        await Assert.ThrowsAsync<WrongPasswordException>(
+            () => svc.ChangeOwnPasswordAsync(row.Id, "totally-wrong", "new-password-456", Ct));
+
+        Assert.Equal(0, store.Writes);
+        Assert.True(hasher.Verify(row.PasswordHash, "old-password-123"));
+    }
+
+    [Fact]
+    public async Task ChangeOwnPasswordAsync_rejects_a_new_password_below_the_floor()
+    {
+        var hasher = Hasher();
+        var row = Row("who@vendor.test");
+        row.PasswordHash = hasher.Hash("old-password-123");
+        var store = new FakeStore { Rows = { row } };
+        var svc = new AdminUserService(store, hasher);
+
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => svc.ChangeOwnPasswordAsync(row.Id, "old-password-123", "short", Ct));
+
+        Assert.Equal(0, store.Writes);
+    }
+
+    [Fact]
+    public async Task ChangeOwnPasswordAsync_unknown_id_throws()
+    {
+        var store = new FakeStore();
+        var svc = new AdminUserService(store, Hasher());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => svc.ChangeOwnPasswordAsync(Guid.NewGuid(), "whatever", "new-password-456", Ct));
+    }
+
+    // ---- ChangeOwnEmailAsync ------------------------------------------------
+
+    [Fact]
+    public async Task ChangeOwnEmailAsync_verifies_password_and_normalises_the_new_email()
+    {
+        var hasher = Hasher();
+        var row = Row("old@vendor.test");
+        row.PasswordHash = hasher.Hash("my-password-123");
+        var store = new FakeStore { Rows = { row } };
+        var svc = new AdminUserService(store, hasher);
+
+        var result = await svc.ChangeOwnEmailAsync(row.Id, "  New.Email@Vendor.TEST ", "my-password-123", Ct);
+
+        Assert.Equal("new.email@vendor.test", result);
+        Assert.Equal("new.email@vendor.test", row.Email);
+        Assert.Equal(1, store.Writes);
+    }
+
+    [Fact]
+    public async Task ChangeOwnEmailAsync_wrong_password_throws_and_writes_nothing()
+    {
+        var hasher = Hasher();
+        var row = Row("old@vendor.test");
+        row.PasswordHash = hasher.Hash("my-password-123");
+        var store = new FakeStore { Rows = { row } };
+        var svc = new AdminUserService(store, hasher);
+
+        await Assert.ThrowsAsync<WrongPasswordException>(
+            () => svc.ChangeOwnEmailAsync(row.Id, "new@vendor.test", "totally-wrong", Ct));
+
+        Assert.Equal(0, store.Writes);
+        Assert.Equal("old@vendor.test", row.Email);
+    }
+
+    [Fact]
+    public async Task ChangeOwnEmailAsync_email_already_taken_throws_and_writes_nothing()
+    {
+        var hasher = Hasher();
+        var row = Row("old@vendor.test");
+        row.PasswordHash = hasher.Hash("my-password-123");
+        var store = new FakeStore { Rows = { row }, ExistingEmails = { "taken@vendor.test" } };
+        var svc = new AdminUserService(store, hasher);
+
+        await Assert.ThrowsAsync<AdminEmailTakenException>(
+            () => svc.ChangeOwnEmailAsync(row.Id, "taken@vendor.test", "my-password-123", Ct));
+
+        Assert.Equal(0, store.Writes);
+        Assert.Equal("old@vendor.test", row.Email);
+    }
+
+    [Fact]
+    public async Task ChangeOwnEmailAsync_keeping_the_same_email_does_not_trip_the_taken_check()
+    {
+        var hasher = Hasher();
+        var row = Row("same@vendor.test");
+        row.PasswordHash = hasher.Hash("my-password-123");
+        var store = new FakeStore { Rows = { row }, ExistingEmails = { "same@vendor.test" } };
+        var svc = new AdminUserService(store, hasher);
+
+        var result = await svc.ChangeOwnEmailAsync(row.Id, "Same@Vendor.Test", "my-password-123", Ct);
+
+        Assert.Equal("same@vendor.test", result);
+        Assert.Equal(1, store.Writes);
     }
 
     // ---- NormalizeEmail ---------------------------------------------------
