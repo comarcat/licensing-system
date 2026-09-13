@@ -1,9 +1,11 @@
 namespace LicensingCore.Entities;
 
 /// <summary>
-/// One installed copy of a licensed product on one machine. A hardware-mismatch
-/// against the license's existing activation creates a *new* Activation row in
-/// PendingReview status rather than mutating the original.
+/// One installed copy of a licensed product, identified by its stable InstallGuid
+/// (activations.(license_id, install_guid) is UNIQUE). A hardware-mismatch against
+/// the recorded fingerprint re-opens review on this same row (CpuId/MotherboardSerial/
+/// TpmId/MacAddressPrimary updated, Status back to PendingReview) rather than forking
+/// a second row — the InstallGuid it would carry is by definition already taken.
 /// </summary>
 public class Activation
 {

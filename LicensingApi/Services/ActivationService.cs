@@ -100,43 +100,10 @@ public partial class ActivationService
 
         await _db.SaveChangesAsync(ct);
 
-        var policy = new PolicyDto
-        {
-            CheckIntervalHours = DefaultCheckIntervalHours,
-            GraceDays = ReviewGraceDays,
-            SubscriptionGraceDays = SubscriptionGraceDays,
-        };
-
         var fileStatus = activation.Status == ActivationStatus.Approved ? "approved" : "pending_review";
-        var licenseFile = _fileService.BuildSignedEncryptedFile(new LicenseFilePayload
-        {
-            LicenseKey = license.LicenseKey,
-            ActivationId = activation.Id,
-            InstallGuid = activation.InstallGuid,
-            Status = fileStatus,
-            CpuId = activation.CpuId,
-            MotherboardSerial = activation.MotherboardSerial,
-            TpmId = activation.TpmId,
-            MacAddressPrimary = activation.MacAddressPrimary,
-            CheckIntervalHours = policy.CheckIntervalHours,
-            GraceDays = policy.GraceDays,
-            SubscriptionGraceDays = policy.SubscriptionGraceDays,
-            SubscriptionExpiryUtc = license.SubscriptionExpiryUtc,
-        });
-
-        var data = new ActivationResultData
-        {
-            ActivationId = activation.Id,
-            Status = fileStatus,
-            LicenseFileBase64 = licenseFile,
-            Policy = policy,
-            SubscriptionExpiryUtc = license.SubscriptionExpiryUtc,
-            ReviewDeadlineUtc = activation.ReviewDeadlineUtc,
-        };
-
-        return ApiResult.Ok(
+        return BuildResult(activation, license,
             activation.Status == ActivationStatus.Approved ? ResultCode.Activated : ResultCode.PendingReview,
-            data);
+            fileStatus);
     }
 
     public async Task<ApiResult> CheckinAsync(CheckinRequest req, CancellationToken ct = default)
@@ -157,19 +124,37 @@ public partial class ActivationService
         if (license.Status == LicenseStatus.Revoked)
             return await LockedResultAsync(activation, license, "LICENSE_REVOKED", ct);
 
-        // Hardware drift check: if it no longer matches, this check-in itself creates
-        // a new pending-review activation (same rule as a fresh /activate mismatch).
+        if (activation.Status is ActivationStatus.Rejected or ActivationStatus.Revoked)
+            return await LockedResultAsync(activation, license,
+                activation.Status == ActivationStatus.Rejected ? "ACTIVATION_REJECTED" : "ACTIVATION_REVOKED", ct);
+
+        if (activation.Status == ActivationStatus.PendingReview
+            && activation.ReviewDeadlineUtc is { } deadline
+            && DateTime.UtcNow > deadline)
+            return await LockedResultAsync(activation, license, "REVIEW_GRACE_ENDED", ct);
+
+        // Hardware drift check: if it no longer matches, this check-in re-opens review
+        // on the SAME activation row. It cannot fork a new row under the same
+        // InstallGuid — activations.(license_id, install_guid) is UNIQUE, and the DLL's
+        // InstallGuid is stable across a hardware change (it identifies the install,
+        // not the machine), so a second row would always collide on that constraint.
         if (!_hwMatch.IsSameMachine(activation, req.Hardware))
         {
-            var reactivateReq = new ActivateRequest
-            {
-                LicenseKey = license.LicenseKey,
-                InstallGuid = req.InstallGuid,
-                Hardware = req.Hardware,
-                Vm = req.Vm,
-                ClientTimestampUtc = req.ClientTimestampUtc,
-            };
-            return await ActivateAsync(reactivateReq, ct);
+            activation.CpuId = req.Hardware.CpuId;
+            activation.MotherboardSerial = req.Hardware.MotherboardSerial;
+            activation.TpmId = req.Hardware.TpmId;
+            activation.MacAddressPrimary = req.Hardware.MacAddressPrimary;
+            activation.Status = ActivationStatus.PendingReview;
+            activation.ReviewDeadlineUtc = DateTime.UtcNow.AddDays(ReviewGraceDays);
+            activation.ApprovedAtUtc = null;
+            activation.RejectedAtUtc = null;
+            activation.ReviewNotes = null;
+            ApplyEnvironmentInfo(activation, req.Hardware, req.Vm);
+
+            await LogAsync("system", "Activation", activation.Id.ToString(), "HardwareDrift", ct);
+            await _db.SaveChangesAsync(ct);
+
+            return BuildResult(activation, license, ResultCode.PendingReview, "pending_review");
         }
 
         // Subscription expiry / grace handling.
@@ -184,6 +169,25 @@ public partial class ActivationService
         ApplyEnvironmentInfo(activation, req.Hardware, req.Vm);
         await _db.SaveChangesAsync(ct);
 
+        var status = activation.Status == ActivationStatus.Approved ? "approved" : "pending_review";
+        return BuildResult(activation, license, ResultCode.Renewed, status);
+    }
+
+    private async Task<ApiResult> LockedResultAsync(Activation activation, License license, string reason, CancellationToken ct)
+    {
+        await LogAsync("system", "Activation", activation.Id.ToString(), $"Locked:{reason}", ct);
+        await _db.SaveChangesAsync(ct);
+
+        return ApiResult.Ok(ResultCode.Locked, new ActivationResultData
+        {
+            ActivationId = activation.Id,
+            Status = "locked",
+            Reason = reason,
+        });
+    }
+
+    private ApiResult BuildResult(Activation activation, License license, ResultCode code, string status)
+    {
         var policy = new PolicyDto
         {
             CheckIntervalHours = DefaultCheckIntervalHours,
@@ -191,7 +195,6 @@ public partial class ActivationService
             SubscriptionGraceDays = SubscriptionGraceDays,
         };
 
-        var status = activation.Status == ActivationStatus.Approved ? "approved" : "pending_review";
         var licenseFile = _fileService.BuildSignedEncryptedFile(new LicenseFilePayload
         {
             LicenseKey = license.LicenseKey,
@@ -208,26 +211,14 @@ public partial class ActivationService
             SubscriptionExpiryUtc = license.SubscriptionExpiryUtc,
         });
 
-        return ApiResult.Ok(ResultCode.Renewed, new ActivationResultData
+        return ApiResult.Ok(code, new ActivationResultData
         {
             ActivationId = activation.Id,
             Status = status,
             LicenseFileBase64 = licenseFile,
             Policy = policy,
             SubscriptionExpiryUtc = license.SubscriptionExpiryUtc,
-        });
-    }
-
-    private async Task<ApiResult> LockedResultAsync(Activation activation, License license, string reason, CancellationToken ct)
-    {
-        await LogAsync("system", "Activation", activation.Id.ToString(), $"Locked:{reason}", ct);
-        await _db.SaveChangesAsync(ct);
-
-        return ApiResult.Ok(ResultCode.Locked, new ActivationResultData
-        {
-            ActivationId = activation.Id,
-            Status = "locked",
-            Reason = reason,
+            ReviewDeadlineUtc = activation.ReviewDeadlineUtc,
         });
     }
 
