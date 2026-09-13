@@ -68,6 +68,23 @@ public class AdminUserServiceEdgeTests
             SetActiveCalls++;
             return Task.CompletedTask;
         }
+
+        public Task UpdatePasswordAsync(AdminUser user, string newHash, AuditLogEntry audit, CancellationToken ct = default)
+        {
+            user.PasswordHash = newHash;
+            return Task.CompletedTask;
+        }
+
+        public Task UpdateEmailAsync(AdminUser user, string newNormalizedEmail, AuditLogEntry audit, CancellationToken ct = default)
+        {
+            if (ExistingEmails.Any(e => string.Equals(e, newNormalizedEmail, StringComparison.OrdinalIgnoreCase))
+                && !string.Equals(user.Email, newNormalizedEmail, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new AdminEmailTakenException(newNormalizedEmail);
+            }
+            user.Email = newNormalizedEmail;
+            return Task.CompletedTask;
+        }
     }
 
     private static AdminUser Row(string email, bool active) => new()

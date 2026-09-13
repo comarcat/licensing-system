@@ -35,10 +35,19 @@ public class SmokeTests : IClassFixture<SmokeTests.SolutionFactory>
     {
         var client = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
 
-        var root = await client.GetAsync("/", TestContext.Current.CancellationToken);
-        Assert.Equal(HttpStatusCode.Found, root.StatusCode);
-        var location = root.Headers.Location!;
+        var dashboard = await client.GetAsync("/dashboard", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Found, dashboard.StatusCode);
+        var location = dashboard.Headers.Location!;
         Assert.StartsWith("/Account/Login", location.IsAbsoluteUri ? location.PathAndQuery : location.OriginalString);
+    }
+
+    [Fact]
+    public async Task Composed_host_serves_the_anonymous_public_landing_page()
+    {
+        var client = _factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+
+        var root = await client.GetAsync("/", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, root.StatusCode);
     }
 
     public sealed class SolutionFactory : WebApplicationFactory<Program>

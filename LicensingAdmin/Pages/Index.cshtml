@@ -1,0 +1,48 @@
+@page "/"
+@using Microsoft.AspNetCore.Authorization
+@attribute [AllowAnonymous]
+@{
+    Layout = null;
+    var authenticated = User.Identity?.IsAuthenticated == true;
+}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Miautrix Licensing System</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link href="~/css/site.css" rel="stylesheet" />
+</head>
+<body>
+    <main class="landing">
+        <div class="landing-card">
+            <div class="landing-logo">⚙</div>
+            <h1 class="landing-title">Miautrix Licensing System</h1>
+            <p class="landing-tagline">
+                El centro de control para emitir, activar y proteger cada licencia de tu
+                software. Claves firmadas criptográficamente, activaciones verificadas por
+                huella de hardware y revisión humana cuando algo no cuadra — todo en un
+                solo panel.
+            </p>
+
+            <div class="landing-features">
+                <div class="landing-feature"><span class="landing-feature-icon">🔑</span><span>Emisión de licencias con clave firmada RSA</span></div>
+                <div class="landing-feature"><span class="landing-feature-icon">🛡️</span><span>Activaciones verificadas por huella de hardware</span></div>
+                <div class="landing-feature"><span class="landing-feature-icon">📋</span><span>Auditoría completa de cada acción administrativa</span></div>
+            </div>
+
+            @if (authenticated)
+            {
+                <a class="landing-cta" href="/dashboard">Ir al panel →</a>
+            }
+            else
+            {
+                <a class="landing-cta" href="/Account/Login">Iniciar sesión →</a>
+            }
+        </div>
+    </main>
+</body>
+</html>

@@ -65,7 +65,9 @@ public class AdminSeederHostRegistrationTests
         using var factory = new AuthorizationPipelineTests.PipelineFactory();
         var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
 
-        var response = await client.GetAsync("/", TestContext.Current.CancellationToken);
+        // "/" is the public landing page; "/dashboard" is the protected one the fallback
+        // policy gates.
+        var response = await client.GetAsync("/dashboard", TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Found, response.StatusCode);
         var location = response.Headers.Location!;

@@ -32,7 +32,7 @@ public class LoginModel(
     public InputModel Input { get; set; } = new();
 
     /// <summary>Local path to return to after a successful sign-in; never an absolute or protocol-relative URL.</summary>
-    public string ReturnUrl { get; set; } = "/";
+    public string ReturnUrl { get; set; } = "/dashboard";
 
     /// <summary><c>null</c> until a sign-in attempt fails, then <see cref="GenericError"/>.</summary>
     public string? Error { get; private set; }
@@ -108,18 +108,18 @@ public class LoginModel(
     {
         if (string.IsNullOrEmpty(returnUrl))
         {
-            return "/";
+            return "/dashboard";
         }
 
         foreach (var c in returnUrl)
         {
             if (char.IsControl(c) || char.IsWhiteSpace(c))
             {
-                return "/";
+                return "/dashboard";
             }
         }
 
-        return Url.IsLocalUrl(returnUrl) ? returnUrl : "/";
+        return Url.IsLocalUrl(returnUrl) ? returnUrl : "/dashboard";
     }
 
     public sealed class InputModel

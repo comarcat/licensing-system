@@ -44,6 +44,22 @@ public class AdminUserServiceGuardTests
             ActiveChange = (user, audit); Writes++;
             return Task.CompletedTask;
         }
+
+        public Task UpdatePasswordAsync(AdminUser user, string newHash, AuditLogEntry audit, CancellationToken ct = default)
+        {
+            user.PasswordHash = newHash; Writes++;
+            return Task.CompletedTask;
+        }
+
+        public Task UpdateEmailAsync(AdminUser user, string newNormalizedEmail, AuditLogEntry audit, CancellationToken ct = default)
+        {
+            if (Rows.Any(u => u.Id != user.Id && string.Equals(u.Email, newNormalizedEmail, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new AdminEmailTakenException(newNormalizedEmail);
+            }
+            user.Email = newNormalizedEmail; Writes++;
+            return Task.CompletedTask;
+        }
     }
 
     private static AdminUser Row(string email, AdminRole role, bool active = true) => new()

@@ -139,3 +139,95 @@ code, .mud-input-slot, .mud-table-cell {
     color: #f87171 !important;
     font-size: .85rem;
 }
+
+/* ---------------------------------------------------------------------
+   Public landing page ("/")
+--------------------------------------------------------------------- */
+.landing {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+}
+
+.landing-card {
+    width: 100%;
+    max-width: 640px;
+    text-align: center;
+    background: linear-gradient(135deg, rgba(255, 255, 255, .06), rgba(255, 255, 255, .02));
+    backdrop-filter: blur(40px);
+    -webkit-backdrop-filter: blur(40px);
+    border: 1px solid rgba(255, 255, 255, .1);
+    border-radius: 28px;
+    padding: 56px 40px;
+}
+
+.landing-logo {
+    font-size: 2.5rem;
+    margin-bottom: 8px;
+}
+
+.landing-title {
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    font-size: 2.25rem;
+    line-height: 1.2;
+    background: linear-gradient(135deg, #fff 0%, #a5b4fc 50%, #ec4899 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin: 0 0 16px;
+}
+
+.landing-tagline {
+    color: rgba(255, 255, 255, .7);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 1rem;
+    max-width: 480px;
+    margin: 0 auto 32px;
+    line-height: 1.6;
+}
+
+.landing-features {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-width: 420px;
+    margin: 0 auto 36px;
+    text-align: left;
+}
+
+.landing-feature {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: rgba(255, 255, 255, .85);
+    font-size: .9rem;
+    background: rgba(255, 255, 255, .04);
+    border: 1px solid rgba(255, 255, 255, .06);
+    border-radius: 12px;
+    padding: 10px 14px;
+}
+
+.landing-feature-icon {
+    font-size: 1.1rem;
+    flex-shrink: 0;
+}
+
+.landing-cta {
+    display: inline-block;
+    background: linear-gradient(135deg, #6366f1, #ec4899);
+    color: #ffffff;
+    text-decoration: none;
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 600;
+    font-size: 1rem;
+    padding: 14px 32px;
+    border-radius: 12px;
+    transition: opacity .2s;
+}
+
+.landing-cta:hover {
+    opacity: .9;
+}
