@@ -41,6 +41,9 @@
             <AuthorizeView Policy="@AuthPolicies.AdminUserAccess">
                 <MudNavLink Href="admin/users" Icon="@Icons.Material.Filled.ManageAccounts">Usuarios admin</MudNavLink>
             </AuthorizeView>
+            <AuthorizeView Policy="@AuthPolicies.AdminUserAccess">
+                <MudNavLink Href="admin/notifications" Icon="@Icons.Material.Filled.Email">Correo (SMTP)</MudNavLink>
+            </AuthorizeView>
         </MudNavMenu>
     </MudDrawer>
     <MudMainContent>

@@ -1,0 +1,198 @@
+@page "/admin/notifications"
+@using LicensingAdmin.Auth
+@using LicensingAdmin.Notifications
+@attribute [Authorize(Policy = AuthPolicies.AdminUserAccess)]
+@inject NotificationConfigService Notifications
+@inject AuthenticationStateProvider AuthState
+@inject ISnackbar Snackbar
+@inject ILoggerFactory LoggerFactory
+
+<MudText Typo="Typo.h4" Class="mb-1">Configuración de correo (SMTP)</MudText>
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+    Servidor saliente usado para notificaciones del sistema. La contraseña se guarda
+    cifrada y nunca se vuelve a mostrar — déjala en blanco para conservar la actual.
+</MudText>
+
+@if (_loading)
+{
+    <MudProgressCircular Indeterminate="true" />
+}
+else
+{
+    <MudPaper Class="pa-4 mb-6" Elevation="1" MaxWidth="560px">
+        <MudGrid>
+            <MudItem xs="12" md="8">
+                <MudTextField @bind-Value="_smtpHost" Label="Servidor SMTP" Immediate="true" />
+            </MudItem>
+            <MudItem xs="12" md="4">
+                <MudNumericField @bind-Value="_smtpPort" Label="Puerto" Immediate="true" Min="1" Max="65535" />
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudSelect T="SmtpEncryption" @bind-Value="_encryption" Label="Cifrado">
+                    @foreach (var e in Enum.GetValues<SmtpEncryption>())
+                    {
+                        <MudSelectItem T="SmtpEncryption" Value="@e">@e</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudSelect T="SmtpAuthType" @bind-Value="_authType" Label="Tipo de autenticación">
+                    @foreach (var a in Enum.GetValues<SmtpAuthType>())
+                    {
+                        <MudSelectItem T="SmtpAuthType" Value="@a">@a</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudTextField @bind-Value="_username" Label="Usuario" Immediate="true" />
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudTextField @bind-Value="_password" Label="Contraseña" InputType="InputType.Password"
+                              Immediate="true" Placeholder="@_passwordPlaceholder" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_fromAddress" Label="Correo remitente (From)"
+                              InputType="InputType.Email" Immediate="true" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudButton OnClick="SaveAsync" Variant="Variant.Filled" Color="Color.Primary"
+                           Disabled="@_busy" StartIcon="@Icons.Material.Filled.Save">
+                    @(_busy ? "Guardando…" : "Guardar")
+                </MudButton>
+            </MudItem>
+        </MudGrid>
+    </MudPaper>
+
+    <MudPaper Class="pa-4" Elevation="1" MaxWidth="560px">
+        <MudText Typo="Typo.subtitle1" Class="mb-2">Enviar correo de prueba</MudText>
+        @if (_lastTestStatus is not null)
+        {
+            <MudText Typo="Typo.body2" Color="@TestStatusColor(_lastTestStatus.Value)" Class="mb-2">
+                Última prueba: @_lastTestStatus (@(_lastTestAtUtc?.ToString("yyyy-MM-dd HH:mm") ?? "—") UTC)
+            </MudText>
+        }
+        <MudGrid>
+            <MudItem xs="12" md="8">
+                <MudTextField @bind-Value="_testRecipient" Label="Enviar a" InputType="InputType.Email" Immediate="true" />
+            </MudItem>
+            <MudItem xs="12" md="4" Class="d-flex align-center">
+                <MudButton OnClick="SendTestAsync" Variant="Variant.Outlined" Color="Color.Secondary"
+                           Disabled="@_busy" StartIcon="@Icons.Material.Filled.Send">
+                    @(_busy ? "Enviando…" : "Enviar prueba")
+                </MudButton>
+            </MudItem>
+        </MudGrid>
+    </MudPaper>
+}
+
+@code {
+    private ILogger Logger => LoggerFactory.CreateLogger("LicensingAdmin.Pages.Admin.NotificationSettings");
+
+    private bool _loading = true;
+    private bool _busy;
+
+    private string _smtpHost = "";
+    private int _smtpPort = 587;
+    private SmtpEncryption _encryption = SmtpEncryption.StartTls;
+    private SmtpAuthType _authType = SmtpAuthType.Basic;
+    private string _username = "";
+    private string? _password;
+    private string _fromAddress = "";
+    private string _passwordPlaceholder = "";
+
+    private string? _testRecipient;
+    private NotificationTestStatus? _lastTestStatus;
+    private DateTime? _lastTestAtUtc;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var config = await Notifications.GetAsync();
+        if (config is not null)
+        {
+            _smtpHost = config.SmtpHost;
+            _smtpPort = config.SmtpPort;
+            _encryption = config.Encryption;
+            _authType = config.AuthType;
+            _username = config.Username;
+            _fromAddress = config.FromAddress;
+            _lastTestStatus = config.LastTestStatus;
+            _lastTestAtUtc = config.LastTestAtUtc;
+            _passwordPlaceholder = config.PasswordEncrypted.Length > 0 ? "•••••••• (sin cambios)" : "";
+        }
+        _loading = false;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_busy) return;
+
+        if (string.IsNullOrWhiteSpace(_smtpHost) || string.IsNullOrWhiteSpace(_fromAddress))
+        {
+            Snackbar.Add("Servidor SMTP y correo remitente son obligatorios.", Severity.Warning);
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            await Notifications.SaveAsync(_smtpHost, _smtpPort, _encryption, _authType, _username, _password, _fromAddress);
+            Snackbar.Add("Configuración guardada.", Severity.Success);
+            if (!string.IsNullOrEmpty(_password))
+            {
+                _passwordPlaceholder = "•••••••• (sin cambios)";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning("Notification config save failed: {Error}.", ex.GetType().Name);
+            Snackbar.Add("No se pudo guardar la configuración.", Severity.Error);
+        }
+        finally
+        {
+            _password = null;
+            _busy = false;
+        }
+    }
+
+    private async Task SendTestAsync()
+    {
+        if (_busy) return;
+
+        if (string.IsNullOrWhiteSpace(_testRecipient))
+        {
+            Snackbar.Add("Indica un correo destino para la prueba.", Severity.Warning);
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            await Notifications.SendTestEmailAsync(_testRecipient);
+            _lastTestStatus = NotificationTestStatus.Success;
+            _lastTestAtUtc = DateTime.UtcNow;
+            Snackbar.Add("Correo de prueba enviado.", Severity.Success);
+        }
+        catch (InvalidOperationException)
+        {
+            Snackbar.Add("Guarda la configuración antes de enviar una prueba.", Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            _lastTestStatus = NotificationTestStatus.Failed;
+            _lastTestAtUtc = DateTime.UtcNow;
+            Logger.LogWarning("Test email send failed: {Error}.", ex.GetType().Name);
+            Snackbar.Add("No se pudo enviar el correo de prueba. Revisa los datos del servidor.", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private static Color TestStatusColor(NotificationTestStatus status) => status switch
+    {
+        NotificationTestStatus.Success => Color.Success,
+        NotificationTestStatus.Failed => Color.Error,
+        _ => Color.Default,
+    };
+}

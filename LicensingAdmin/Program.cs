@@ -1,5 +1,6 @@
 using LicensingAdmin.Auth;
 using LicensingAdmin.Licensing;
+using LicensingAdmin.Notifications;
 using LicensingAdmin.Startup;
 using LicensingCore.Configuration;
 using LicensingCore.Data;
@@ -105,6 +106,13 @@ builder.Services.AddScoped<LicenseIssuanceService>();
 // Seeds the first SuperAdmin on startup from Admin:BootstrapEmail / Admin:BootstrapPassword
 // when admin_users is empty; a no-op once a real admin exists or the config is absent.
 builder.Services.AddHostedService<AdminSeeder>();
+
+// Notification Settings screen (E3): SMTP config is admin-editable data, not static
+// app config, so it lives in the DB (NotificationConfig) with the password encrypted
+// via Data Protection rather than in appsettings/user-secrets.
+builder.Services.AddScoped<INotificationConfigStore, EfNotificationConfigStore>();
+builder.Services.AddScoped<IEmailSender, MailKitEmailSender>();
+builder.Services.AddScoped<NotificationConfigService>();
 
 var app = builder.Build();
 
