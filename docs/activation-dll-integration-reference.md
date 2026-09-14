@@ -2,9 +2,10 @@
 
 **Audience:** the developer of the client-side activation tool (DLL/EXE) that runs on
 the end customer's machine and talks to `LicensingApi`.
-**Status:** matches the code in `LicensingApi` on `main` as of 2026-09-13 (project
-closure). Admin-facing endpoints (issue/revoke/reports) are a separate, already-built
-surface in `LicensingAdmin` — this document covers only the two endpoints the client
+**Status:** matches the code in `LicensingApi` on `main` as of 2026-09-14 (post-closure
+bugfix round — a real production crash, see §8). Admin-facing endpoints (issue/revoke/
+reports) are a separate, already-built surface in `LicensingAdmin` — this document
+covers only the two endpoints the client
 tool calls.
 **Live instance:** `https://licensing-api.miautrix.tech` — public hostname, TLS
 terminated at Cloudflare's edge and re-encrypted (Cloudflare Tunnel, Full/strict) to
@@ -298,17 +299,40 @@ this document and the public key above.
   the check-in cadence continues normally.
 - **Hardware fingerprint changes** (new machine, or a component swap that changes one of
   the 4 fields) → the *same* `ActivationId` re-enters `PendingReview` with the new
-  fingerprint, *including on a `/checkin` call* — a checkin is not guaranteed to return
-  `Renewed`. Keep using the `ActivationId`/`InstallGuid` you already have; nothing new
-  is issued for this case.
-- **Subscription expiry**: once `SubscriptionExpiryUtc` + `SubscriptionGraceDays` (30
-  days) has passed, checkin returns `Locked` with `Reason = "SUBSCRIPTION_EXPIRED_GRACE_ENDED"`
-  and no `LicenseFileBase64` — the client should stop honoring any previously cached
-  license file at that point regardless of what it says locally.
-- **Revoked license**: any checkin against a revoked license returns `Locked` with
-  `Reason = "LICENSE_REVOKED"`, no license file.
+  fingerprint — a `/checkin` is not guaranteed to return `Renewed`. Keep using the
+  `ActivationId`/`InstallGuid` you already have; nothing new is ever issued for this case.
+- **Calling `/activate` again with an `InstallGuid` you already have** (whether its
+  hardware matches what's on file or not) always re-opens `PendingReview` on that same
+  record if it isn't currently `Approved` — this applies even if that `InstallGuid`'s
+  activation was previously `Rejected` or individually `Revoked`. It never creates a
+  second record for the same `InstallGuid` (that pair is unique per license). Practical
+  effect: nothing is permanently locked out from a client's point of view — a support
+  flow that has the customer re-run activation after a policy exception is granted
+  works, because `/activate` re-opens review rather than returning `Locked` again.
+  **`/checkin` behaves differently for the same activation** — it returns `Locked`
+  (§6.1) and does *not* reopen review; only a fresh `/activate` call does.
 - **Perpetual licenses** (no `SubscriptionExpiryUtc`) never lock on subscription grounds
   — only revocation locks them.
+
+### 6.1 `Locked` reasons (`/checkin` only)
+
+`/activate` never returns `Locked` — its equivalents are the top-level
+`LicenseRevoked`/`LicenseExpired`/`MaxActivationsReached` failure codes (§3).
+
+| `Reason`                          | Meaning | License file included? |
+|---|---|---|
+| `LICENSE_REVOKED`                 | The license itself was revoked (`License.Status = Revoked`) | No |
+| `SUBSCRIPTION_EXPIRED_GRACE_ENDED`| `SubscriptionExpiryUtc` + `SubscriptionGraceDays` (30 days) has passed | No |
+| `ACTIVATION_REJECTED`             | An admin rejected this specific activation in Pending Review | No |
+| `ACTIVATION_REVOKED`              | This specific activation was individually revoked (independent of the license) | No |
+| `REVIEW_GRACE_ENDED`              | This activation sat in `PendingReview` past its 15-day `ReviewDeadlineUtc` with no admin decision | No |
+
+None of these carry a `LicenseFileBase64` — stop honoring any previously cached license
+file the moment you see any of them, regardless of what it says locally. `ACTIVATION_REJECTED`
+and `REVIEW_GRACE_ENDED` are not necessarily permanent, though: since a hardware change
+re-opens review on the same record (above), a customer support flow that has the
+customer re-run activation after a policy exception is granted will work — a fresh
+`/activate` call re-enters `PendingReview` rather than staying `Locked`.
 
 ## 7. Sample activate request/response
 
@@ -370,3 +394,8 @@ Resolved since the first version of this document:
   chain, confirmed against the rate limiter (§3).
 - The license file's AES-256-GCM encryption layer, which required every integrator to
   receive a symmetric key out of band (2026-09-13) — dropped; see §5.
+- A real production 500 (`ServerError`): calling `/activate` again with an `InstallGuid`
+  that already owned a `Rejected`/`Revoked` row, or whose hardware had drifted, always
+  crashed with a unique-constraint violation trying to insert a second row for that
+  `InstallGuid` (2026-09-14). Fixed — see §6's `/activate`-reuse bullet; reproduced and
+  re-verified against the exact request that had failed in production.
