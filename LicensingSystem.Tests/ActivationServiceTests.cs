@@ -503,4 +503,60 @@ public sealed class ActivationServiceTests : IDisposable
         Assert.Equal("CPU-2", reloaded.CpuId);
         Assert.NotNull(reloaded.ReviewDeadlineUtc);
     }
+
+    [Fact]
+    public async Task Activate_SameInstallGuidAsARejectedActivation_ReopensReviewOnThatRowInsteadOfCrashing()
+    {
+        // Regression test for a real production 500: reported live as a rejected
+        // activation's InstallGuid calling /api/activate again with the SAME (already
+        // on file, now-rejected) hardware. ActivateAsync's "no match" branch — match is
+        // null because FindMatchingActivation excludes Rejected — tried to INSERT a new
+        // Activation row reusing that InstallGuid, which already belongs to the rejected
+        // row for this license. (LicenseId, InstallGuid) is UNIQUE, so this always threw
+        // DbUpdateException/23505 in production, surfaced to the client as ServerError.
+        var license = await SeedLicenseAsync(maxActivations: 5);
+        var hw = Hw("2");
+        var rejected = await SeedActivationAsync(license, hw, ActivationStatus.Rejected);
+
+        var result = await _service.ActivateAsync(new ActivateRequest
+        {
+            LicenseKey = license.LicenseKey,
+            InstallGuid = rejected.InstallGuid,
+            Hardware = hw,
+        }, Ct);
+
+        Assert.True(result.Success);
+        Assert.Equal(ResultCode.PendingReview, result.Code);
+        Assert.Equal(rejected.Id, result.Data!.ActivationId);
+        Assert.Equal(1, await _db.Activations.CountAsync(Ct));
+
+        var reloaded = await _db.Activations.FirstAsync(a => a.Id == rejected.Id, Ct);
+        Assert.Equal(ActivationStatus.PendingReview, reloaded.Status);
+        Assert.Null(reloaded.RejectedAtUtc);
+    }
+
+    [Fact]
+    public async Task Activate_SameInstallGuidDifferentHardwareThanItsApprovedRecord_ReopensReviewOnThatRowInsteadOfCrashing()
+    {
+        // Same root cause as above, reached via a plain hardware change on an existing
+        // Approved activation through a direct /activate call rather than /checkin.
+        var license = await SeedLicenseAsync(maxActivations: 5);
+        var approved = await SeedActivationAsync(license, Hw("1"), ActivationStatus.Approved);
+
+        var result = await _service.ActivateAsync(new ActivateRequest
+        {
+            LicenseKey = license.LicenseKey,
+            InstallGuid = approved.InstallGuid,
+            Hardware = Hw("2"),
+        }, Ct);
+
+        Assert.True(result.Success);
+        Assert.Equal(ResultCode.PendingReview, result.Code);
+        Assert.Equal(approved.Id, result.Data!.ActivationId);
+        Assert.Equal(1, await _db.Activations.CountAsync(Ct));
+
+        var reloaded = await _db.Activations.FirstAsync(a => a.Id == approved.Id, Ct);
+        Assert.Equal(ActivationStatus.PendingReview, reloaded.Status);
+        Assert.Equal("CPU-2", reloaded.CpuId);
+    }
 }

@@ -48,7 +48,7 @@ public partial class ActivationService
         var match = _hwMatch.FindMatchingActivation(license.Activations, req.Hardware);
 
         Activation activation;
-        bool isNewInstall;
+        string logAction;
 
         if (match is not null)
         {
@@ -65,37 +65,63 @@ public partial class ActivationService
                 match.Status = ActivationStatus.Approved;
             }
             activation = match;
-            isNewInstall = false;
+            logAction = "Reactivated";
         }
         else
         {
-            // No hardware match on record for this license: new install or a changed machine.
-            var approvedCount = license.Activations.Count(a => a.Status == ActivationStatus.Approved);
-            if (approvedCount >= license.MaxActivations)
-                return ApiResult.Fail(ResultCode.MaxActivationsReached,
-                    $"Maximum number of active installations ({license.MaxActivations}) reached for this license.");
-
-            activation = new Activation
+            // No hardware match on record for this license. This InstallGuid may still
+            // already own a row here — e.g. it was Rejected/Revoked (FindMatchingActivation
+            // deliberately excludes those from hardware matching), or its hardware simply
+            // drifted since a direct (non-checkin) /activate call. Either way, a second row
+            // for this (LicenseId, InstallGuid) pair can never be inserted — it's UNIQUE,
+            // and the client's InstallGuid is stable — so re-open review on that SAME row
+            // instead of trying (and failing) to create a new one. Only when this
+            // InstallGuid has never been seen before is this genuinely a new install.
+            var existingForInstall = license.Activations.FirstOrDefault(a => a.InstallGuid == req.InstallGuid);
+            if (existingForInstall is not null)
             {
-                Id = Guid.NewGuid(),
-                LicenseId = license.Id,
-                InstallGuid = req.InstallGuid,
-                CpuId = req.Hardware.CpuId,
-                MotherboardSerial = req.Hardware.MotherboardSerial,
-                TpmId = req.Hardware.TpmId,
-                MacAddressPrimary = req.Hardware.MacAddressPrimary,
-                Status = ActivationStatus.PendingReview,
-                FirstActivatedAtUtc = DateTime.UtcNow,
-                ReviewDeadlineUtc = DateTime.UtcNow.AddDays(ReviewGraceDays),
-            };
-            ApplyEnvironmentInfo(activation, req.Hardware, req.Vm);
+                existingForInstall.CpuId = req.Hardware.CpuId;
+                existingForInstall.MotherboardSerial = req.Hardware.MotherboardSerial;
+                existingForInstall.TpmId = req.Hardware.TpmId;
+                existingForInstall.MacAddressPrimary = req.Hardware.MacAddressPrimary;
+                existingForInstall.Status = ActivationStatus.PendingReview;
+                existingForInstall.ReviewDeadlineUtc = DateTime.UtcNow.AddDays(ReviewGraceDays);
+                existingForInstall.ApprovedAtUtc = null;
+                existingForInstall.RejectedAtUtc = null;
+                existingForInstall.ReviewNotes = null;
+                ApplyEnvironmentInfo(existingForInstall, req.Hardware, req.Vm);
 
-            _db.Activations.Add(activation);
-            isNewInstall = true;
+                activation = existingForInstall;
+                logAction = "HardwareDrift";
+            }
+            else
+            {
+                var approvedCount = license.Activations.Count(a => a.Status == ActivationStatus.Approved);
+                if (approvedCount >= license.MaxActivations)
+                    return ApiResult.Fail(ResultCode.MaxActivationsReached,
+                        $"Maximum number of active installations ({license.MaxActivations}) reached for this license.");
+
+                activation = new Activation
+                {
+                    Id = Guid.NewGuid(),
+                    LicenseId = license.Id,
+                    InstallGuid = req.InstallGuid,
+                    CpuId = req.Hardware.CpuId,
+                    MotherboardSerial = req.Hardware.MotherboardSerial,
+                    TpmId = req.Hardware.TpmId,
+                    MacAddressPrimary = req.Hardware.MacAddressPrimary,
+                    Status = ActivationStatus.PendingReview,
+                    FirstActivatedAtUtc = DateTime.UtcNow,
+                    ReviewDeadlineUtc = DateTime.UtcNow.AddDays(ReviewGraceDays),
+                };
+                ApplyEnvironmentInfo(activation, req.Hardware, req.Vm);
+
+                _db.Activations.Add(activation);
+                logAction = "Created";
+            }
         }
 
-        await LogAsync("system", "Activation", activation.Id.ToString(),
-            isNewInstall ? "Created" : "Reactivated", ct);
+        await LogAsync("system", "Activation", activation.Id.ToString(), logAction, ct);
 
         await _db.SaveChangesAsync(ct);
 
