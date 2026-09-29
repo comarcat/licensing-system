@@ -49,7 +49,7 @@ run() {
 # therefore does not trip the scan of the repo it is protecting.
 CANARY_DIR=$(mktemp -d)
 trap 'rm -rf "$CANARY_DIR"' EXIT INT TERM
-prefix="gh"; mid="p_"; body="1234567890abcdefghijklmnopqrstuvwxyzAB"
+prefix="xoxb"; mid="-123456789012-1234567890123-"; body="abcdefghijklmnopqrstuvwx"
 printf 'token = "%s%s%s"\n' "$prefix" "$mid" "$body" > "$CANARY_DIR/canary.txt"
 
 if [ -n "${GITLEAKS_BIN:-}" ]; then GL="$GITLEAKS_BIN"
