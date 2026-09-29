@@ -1,0 +1,111 @@
+# Miautrix shared gitleaks configuration — MIA-22
+#
+# One definition, copied verbatim into every Miautrix repo. Do not fork it per
+# repo: a divergent allowlist is how a real secret gets waved through in one
+# place and caught in another.
+#
+# Used by:
+#   - .githooks/pre-commit                 blocks a secret BEFORE the commit exists
+#   - .github/workflows/secret-scan.yml    fails the build, failure-closed
+# Both go through scripts/secret-scan.sh so there is exactly one code path.
+#
+# Every allowlist entry below exists because a real full-history scan flagged it
+# and it was verified as a non-credential. Each carries the repo and file it came
+# from. If you add an entry, add the same evidence.
+
+title = "Miautrix shared secret-scanning config"
+
+# Inherit gitleaks' upstream rule set rather than re-declaring rules. Upstream
+# rule improvements arrive with a version bump; we only ever subtract.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known-safe throwaways, each verified against a full-history scan on 2026-09-29"
+
+paths = [
+  # Template env files exist to be committed. Real values live in the runtime
+  # environment, never in the repo.
+  '''(^|/)\.env\.example$''',
+  '''(^|/)\.env\.sample$''',
+  '''(^|/)\.env\.template$''',
+
+  # Dependency lockfiles: integrity hashes, not secrets.
+  '''(^|/)composer\.lock$''',
+  '''(^|/)package-lock\.json$''',
+  '''(^|/)packages\.lock\.json$''',
+
+  # Generated code-graph output (miautrix-mail-server, miautrix-ServiceTrayMonitor,
+  # miautrix-network-asset-scanner). Machine-written: SHA-256 content hashes and
+  # .NET type names such as "X509Certificate2" parsed as high-entropy tokens.
+  # 157 of the 161 raw mail-server findings were this one directory.
+  '''(^|/)graphify-out/''',
+
+  # Build output. Never a source of truth, re-derived on every build.
+  '''(^|/)(bin|obj)/''',
+
+  # Visual Studio / Rider per-developer cache. Binary, machine-generated, and
+  # re-created on open. miautrix-ServiceTrayMonitor commits 13 of these files, and
+  # its FileContentIndex/*.vsidx blobs contain sorted-substring runs that match the
+  # AWS access-key shape by coincidence (e.g. "ASIASPATAATEATFATHAT" — visibly
+  # concatenated alphabetical fragments, not a key).
+  # Note: these files should not be tracked at all. Allowlisted here so the signal
+  # stays trustworthy; untracking them is separate repo hygiene.
+  '''(^|/)\.vs/''',
+  '''(^|/)\.idea/''',
+
+  # These two files describe secret patterns in order to ban them.
+  '''(^|/)\.gitleaks\.toml$''',
+  '''(^|/)scripts/secret-scan\.sh$''',
+]
+
+regexes = [
+  # ---------------------------------------------------------------- placeholders
+  # Documentation and agent-skill rule files that show what a secret LOOKS like.
+  # miautrix-website .claude/skills/laravel-best-practices/rules/config.md
+  # contains SECRET=sk_live_abc123.
+  '''sk_(live|test)_abc123''',
+
+  # Obvious placeholder bodies. A value that announces it is fake is not a credential.
+  '''(?i)^(changeme|placeholder|example|dummy|sample|redacted|your[-_ ]?\w+[-_ ]?here|xxx+|test+|fake)$''',
+
+  # ------------------------------------------------------- test licence fixtures
+  # Miautrix licence keys are formatted AAAA-BBBBB-CCCC-DDDD-EEEE-FFFF-GG. Test
+  # fixtures use that shape with visibly sequential or repo-shared bodies, and
+  # appear in test projects across licensing-system,
+  # miautrix-network-asset-scanner and miautrix-ServiceTrayMonitor.
+  # Deliberately NOT a blanket allow of the licence-key format: each entry is one
+  # exact committed fixture value, so a genuine customer key is still flagged.
+  '''ABCD-EFGH1?-IJKL-MNOP-QRST-UVWX-YZ''',
+  '''ABCD-EFGHJ-KLMN-PQRS-TUVW-XYZ2-34''',
+  '''TEST-12345-ABCD-EFGH-IJKL-MNOP-12''',
+  '''BRCX-IH9BC-X9ZV-KQXC-2NLY-CO03-8P''',
+
+  # ------------------------------------------------ PEM in source, not key material
+  # A C# interpolated string that BUILDS a PEM at runtime. The body is a
+  # {Convert.ToBase64String(...)} hole, so no key material is present.
+  # miautrix-mail-server src/Miautrix.Mail.Protocols.Smtp/DkimService.cs
+  '''-----BEGIN [A-Z ]*PRIVATE KEY-----\\n\{''',
+
+  # A PEM header with a trivially short literal body ("AAAA"), used to assert that
+  # invalid key material is REJECTED.
+  # licensing-system LicensingSystem.Tests/CryptoRegistrationTests.cs
+  '''-----BEGIN [A-Z ]*PRIVATE KEY-----\\n[A-Za-z0-9+/=]{0,32}\\n-----END''',
+
+  # ------------------------------------------- CI service containers on localhost
+  # A password for a service container that is created, used and destroyed inside
+  # a single CI job, reachable only on 127.0.0.1, is not a credential: there is
+  # nothing to steal and nowhere to use it. Scoped to the exact throwaway values
+  # so a real deploy token pasted into a workflow is still caught.
+  # miautrix-website .github/workflows/ci.yml sets POSTGRES_PASSWORD/DB_PASSWORD
+  # to "miautrix" against DB_HOST=127.0.0.1.
+  '''(?i)(POSTGRES_PASSWORD|DB_PASSWORD|MYSQL_PASSWORD|MYSQL_ROOT_PASSWORD)\s*[:=]\s*["']?(miautrix|postgres|mysql|root|secret|test)["']?\s*$''',
+]
+
+stopwords = [
+  "abc123",
+  "example",
+  "placeholder",
+  "changeme",
+  "x509certificate2",
+]

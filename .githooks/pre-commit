@@ -1,0 +1,17 @@
+#!/bin/sh
+# Miautrix pre-commit hook — MIA-22
+#
+# Blocks a secret BEFORE the commit object exists. Once a secret is committed and
+# pushed it is permanent for practical purposes: history rewrites are expensive
+# and, as MIA-21 showed, never fully complete. This is the cheap boundary.
+#
+# Installed by `scripts/install-hooks.sh`, which points core.hooksPath at
+# .githooks/ so the hook is version-controlled instead of living untracked in
+# .git/hooks where nobody can review it and every clone starts unprotected.
+#
+# POSIX sh on purpose — this is the shell git uses for hooks on Linux, macOS, and
+# Windows (via Git for Windows' bundled sh).
+
+set -eu
+
+exec "$(git rev-parse --show-toplevel)/scripts/secret-scan.sh" staged
