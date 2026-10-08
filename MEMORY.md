@@ -1,0 +1,1 @@
+- [Licensing V2 Evolution](memory/project-licensing-v2.md) — project

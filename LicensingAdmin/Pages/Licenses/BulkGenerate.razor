@@ -1,0 +1,71 @@
+@page "/licenses/bulk"
+@using LicensingAdmin.Auth
+@using LicensingCore.Data
+@using LicensingCore.Entities
+@using Microsoft.EntityFrameworkCore
+@using LicensingAdmin.Services
+@using Microsoft.JSInterop
+@inject IJSRuntime JS
+@attribute [Authorize(Policy = AuthPolicies.IssueAccess)]
+
+<MudText Typo="Typo.h5" GutterBottom="true">Generación Masiva de Licencias</MudText>
+
+@if (_isGenerating)
+{
+    <MudProgressLinear Value="@_progress" Color="Color.Primary" Class="my-4" />
+    <MudText>Generando licencias: @_progress%</MudText>
+}
+else
+{
+    <MudPaper Class="pa-4">
+        <MudForm @ref="_form">
+            <MudSelect T="Guid" Label="Producto" ValueChanged="OnProductChanged" Required="true">
+                @foreach (var p in _products) { <MudSelectItem Value="@p.Id">@p.Name</MudSelectItem> }
+            </MudSelect>
+            <MudSelect T="Guid" Label="Versión" @bind-Value="_versionId" Required="true">
+                @foreach (var v in _versions) { <MudSelectItem Value="@v.Id">@v.Name</MudSelectItem> }
+            </MudSelect>
+            <MudNumericField @bind-Value="_quantity" Label="Cantidad" Min="1" Max="500" Required="true" />
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="GenerateBulk" Class="mt-4">Generar y Descargar</MudButton>
+        </MudForm>
+    </MudPaper>
+}
+
+@code {
+    MudForm _form;
+    Guid _productId;
+    Guid _versionId;
+    int _quantity = 1;
+    bool _isGenerating;
+    double _progress;
+    List<SoftwareProduct> _products = new();
+    List<ProductVersion> _versions = new();
+    [Inject] IDbContextFactory<AppDbContext> DbFactory { get; set; } = default!;
+    [Inject] BulkLicenseService BulkService { get; set; } = default!;
+    [Inject] AuthenticationStateProvider AuthState { get; set; } = default!;
+
+    protected override async Task OnInitializedAsync() {
+        using var db = await DbFactory.CreateDbContextAsync();
+        _products = await db.SoftwareProducts.ToListAsync();
+    }
+
+    private async Task OnProductChanged(Guid productId) {
+        _productId = productId;
+        using var db = await DbFactory.CreateDbContextAsync();
+        _versions = await db.ProductVersions.Where(v => v.ProductId == productId).ToListAsync();
+        _versionId = Guid.Empty;
+    }
+
+    async Task GenerateBulk() {
+        var authState = await AuthState.GetAuthenticationStateAsync();
+        var email = authState.User.Identity?.Name ?? "system";
+        _isGenerating = true;
+        _progress = 0;
+        var progress = new Progress<double>(p => { _progress = p; StateHasChanged(); });
+
+        var (fileContent, _) = await BulkService.GenerateAsync(_productId, _versionId, _quantity, email, progress, CancellationToken.None);
+
+        await JS.InvokeVoidAsync("downloadFileFromStream", $"licencias-{DateTime.UtcNow:yyyyMMdd}.xlsx", Convert.ToBase64String(fileContent));
+        _isGenerating = false;
+    }
+}

@@ -40,6 +40,9 @@ public sealed record LicenseIssuanceRequest
     /// <summary>Optional customer name recorded on the license.</summary>
     public string? CustomerName { get; init; }
 
+    /// <summary>Optional VersionId for the license.</summary>
+    public Guid? VersionId { get; init; }
+
     /// <summary>Email of the admin performing the issuance; written to <see cref="AuditLogEntry.Actor"/>.</summary>
     public required string IssuedBy { get; init; }
 }

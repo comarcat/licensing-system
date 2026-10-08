@@ -8,6 +8,7 @@ public class AppDbContext : DbContext
     public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
 
     public DbSet<SoftwareProduct> SoftwareProducts => Set<SoftwareProduct>();
+    public DbSet<ProductVersion> ProductVersions => Set<ProductVersion>();
     public DbSet<License> Licenses => Set<License>();
     public DbSet<Activation> Activations => Set<Activation>();
     public DbSet<AdminUser> AdminUsers => Set<AdminUser>();
@@ -30,6 +31,27 @@ public class AppDbContext : DbContext
             e.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc");
             e.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc");
             e.HasIndex(x => x.Name);
+
+            e.HasMany(x => x.Versions)
+                .WithOne(v => v.Product)
+                .HasForeignKey(v => v.ProductId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---------------- ProductVersion ----------------
+        modelBuilder.Entity<ProductVersion>(e =>
+        {
+            e.ToTable("product_versions");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnName("id");
+            e.Property(x => x.ProductId).HasColumnName("product_id");
+            e.Property(x => x.Name).HasColumnName("name").HasMaxLength(200).IsRequired();
+            e.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc");
+
+            e.HasOne(x => x.Product)
+                .WithMany(p => p.Versions)
+                .HasForeignKey(x => x.ProductId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         // ---------------- License ----------------
@@ -39,6 +61,7 @@ public class AppDbContext : DbContext
             e.HasKey(x => x.Id);
             e.Property(x => x.Id).HasColumnName("id");
             e.Property(x => x.ProductId).HasColumnName("product_id");
+            e.Property(x => x.VersionId).HasColumnName("version_id");
             e.Property(x => x.LicenseKey).HasColumnName("license_key").HasMaxLength(50).IsRequired();
             e.HasIndex(x => x.LicenseKey).IsUnique();
             e.Property(x => x.ModelSnapshot).HasColumnName("model_snapshot").HasConversion<int>();
@@ -58,7 +81,14 @@ public class AppDbContext : DbContext
                 .HasForeignKey(x => x.ProductId)
                 .OnDelete(DeleteBehavior.Restrict);
 
+            e.HasOne(x => x.Version)
+                .WithMany()
+                .HasForeignKey(x => x.VersionId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasIndex(x => x.LicenseKey).IsUnique();
             e.HasIndex(x => x.ProductId);
+            e.HasIndex(x => x.VersionId);
             e.HasIndex(x => x.Status);
             e.HasIndex(x => x.SubscriptionExpiryUtc);
             e.HasIndex(x => x.IsArchived);

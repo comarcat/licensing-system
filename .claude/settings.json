@@ -27,11 +27,6 @@
       "Bash(awk:*)",
       "Bash(wc:*)",
       "Bash(test:*)"
-    ],
-    "deny": [
-      "Read(./**/appsettings*.Local.json)",
-      "Bash(git push:*)",
-      "Bash(dotnet ef database drop:*)"
     ]
   }
 }

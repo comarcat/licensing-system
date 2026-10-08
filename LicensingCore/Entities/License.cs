@@ -12,6 +12,9 @@ public class License
     public Guid ProductId { get; set; }
     public SoftwareProduct Product { get; set; } = null!;
 
+    public Guid VersionId { get; set; }
+    public ProductVersion Version { get; set; } = null!;
+
     /// <summary>Human-typeable key, format: XXXX-XXXXX-XXXX-XXXX-XXXX-XXXX-XX.</summary>
     public required string LicenseKey { get; set; }
 

@@ -60,11 +60,14 @@ public sealed class ActivationServiceTests : IDisposable
         DateTime? subscriptionExpiryUtc = null)
     {
         var product = new SoftwareProduct { Id = Guid.NewGuid(), Name = "Widget", Vendor = "Acme" };
+        var version = new ProductVersion { Id = Guid.NewGuid(), ProductId = product.Id, Name = "v1.0" };
         var license = new License
         {
             Id = Guid.NewGuid(),
             ProductId = product.Id,
             Product = product,
+            VersionId = version.Id,
+            Version = version,
             LicenseKey = "ABCD-EFGH1-IJKL-MNOP-QRST-UVWX-YZ",
             MaxActivations = maxActivations,
             Status = status,
@@ -72,6 +75,7 @@ public sealed class ActivationServiceTests : IDisposable
             Signature = new byte[] { 1, 2, 3 },
         };
         _db.SoftwareProducts.Add(product);
+        _db.ProductVersions.Add(version);
         _db.Licenses.Add(license);
         await _db.SaveChangesAsync(Ct);
         return license;

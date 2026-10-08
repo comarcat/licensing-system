@@ -83,6 +83,7 @@ public sealed class LicenseIssuanceService(ILicenseSigner signer, ILicenseStore 
         {
             Id = Guid.NewGuid(),
             ProductId = productId,
+            VersionId = request.VersionId ?? Guid.Empty,
             LicenseKey = key,
             ModelSnapshot = request.Model,
             MaxActivations = request.MaxActivations,

@@ -25,6 +25,7 @@ public class ActivateRequest
     public required HardwareInfo Hardware { get; set; }
     public VmInfo? Vm { get; set; }
     public string? AppVersion { get; set; }
+    public Guid? VersionId { get; set; }
     public DateTime ClientTimestampUtc { get; set; }
 }
 

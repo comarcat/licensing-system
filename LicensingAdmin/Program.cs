@@ -121,6 +121,7 @@ builder.Services.AddScoped<NotificationConfigService>();
 
 // Full licenses+activations Excel export (E3 item 5).
 builder.Services.AddScoped<LicenseExportService>();
+builder.Services.AddScoped<LicensingAdmin.Services.BulkLicenseService>();
 
 // Product catalog CRUD (E4 item 8).
 builder.Services.AddScoped<IProductStore, EfProductStore>();

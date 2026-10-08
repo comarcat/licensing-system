@@ -39,6 +39,9 @@ public partial class ActivationService
         if (license is null)
             return ApiResult.Fail(ResultCode.LicenseNotFound, "No license found for this key.");
 
+        if (req.VersionId.HasValue && req.VersionId.Value != license.VersionId)
+            return ApiResult.Fail(ResultCode.InvalidKeyFormat, "Product version mismatch for the provided license key.");
+
         if (license.Status == LicenseStatus.Revoked)
             return ApiResult.Fail(ResultCode.LicenseRevoked, "This license has been revoked.");
 

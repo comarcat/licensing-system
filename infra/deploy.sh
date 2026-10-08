@@ -34,6 +34,16 @@ rm -rf "$PUBLISH_DIR/api"
 dotnet publish "$REPO_ROOT/LicensingApi/LicensingApi.csproj" \
   -c Release -o "$PUBLISH_DIR/api" --self-contained false -r linux-x64
 
+echo "==> comprobación previa y backup en $LXC_HOST"
+ssh "root@$LXC_HOST" "
+  echo 'Checking disk space...' && df -h / &&
+  mkdir -p /var/backups/licensing-v2-pre &&
+  echo 'Backing up PostgreSQL database...' &&
+  pg_dump -U postgres licensing_db > /var/backups/licensing-v2-pre/db_backup_\$(date +%Y%m%d_%H%M%S).sql || true &&
+  echo 'Backing up current app files...' &&
+  tar -czf /var/backups/licensing-v2-pre/files_backup_\$(date +%Y%m%d_%H%M%S).tar.gz /var/www/licensing/ || true
+"
+
 echo "==> stopping services on $LXC_HOST"
 ssh "root@$LXC_HOST" "systemctl stop licensing-admin licensing-api || true"
 
