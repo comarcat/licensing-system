@@ -77,6 +77,9 @@ async Task ActivateAsync()
         Hardware = hardware,
         AppVersion = "hello-world-1.0",
         ClientTimestampUtc = DateTime.UtcNow,
+        // E3-T5: allow version/status for compat testing
+        VersionId = ArgOrEnv(args, "--version-id", "ACTIVATION_VERSION_ID") is { } vidStr ? Guid.Parse(vidStr) : null,
+        Status = ArgOrEnv(args, "--status", "ACTIVATION_STATUS") is { } stStr ? Enum.Parse<ActivationHelloWorld.LicenseStatus>(stStr) : null,
     }, CancellationToken.None);
 
     PrintResult("activate", status, result);

@@ -45,6 +45,7 @@
     <HeaderContent>
         <MudTh>License Key</MudTh>
         <MudTh>Product</MudTh>
+        <MudTh>Version</MudTh>
         <MudTh>Cliente</MudTh>
         <MudTh>Model</MudTh>
         <MudTh>Max Act.</MudTh>
@@ -56,6 +57,7 @@
     <RowTemplate>
         <MudTd DataLabel="Key"><MudText Typo="Typo.body2" Style="font-family:monospace">@context.LicenseKey</MudText></MudTd>
         <MudTd DataLabel="Product">@context.ProductName</MudTd>
+        <MudTd DataLabel="Version">@context.VersionName</MudTd>
         <MudTd DataLabel="Cliente">
             @if (string.IsNullOrWhiteSpace(context.CustomerName) && string.IsNullOrWhiteSpace(context.CustomerEmail))
             {
@@ -123,6 +125,7 @@
         public Guid Id { get; set; }
         public string LicenseKey { get; set; } = "";
         public string ProductName { get; set; } = "";
+        public string VersionName { get; set; } = "";
         public string? CustomerName { get; set; }
         public string? CustomerEmail { get; set; }
         public LicenseModel ModelSnapshot { get; set; }
@@ -197,6 +200,7 @@
                 Id = l.Id,
                 LicenseKey = l.LicenseKey,
                 ProductName = l.Product.Name,
+                VersionName = l.Version.Name,
                 CustomerName = l.CustomerName,
                 CustomerEmail = l.CustomerEmail,
                 ModelSnapshot = l.ModelSnapshot,

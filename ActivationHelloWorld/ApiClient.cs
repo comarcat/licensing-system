@@ -4,6 +4,14 @@ using System.Text.Json.Serialization;
 
 namespace ActivationHelloWorld;
 
+public enum LicenseStatus
+{
+    Active = 0,
+    Revoked = 1,
+    Expired = 2,
+    Test = 3,
+}
+
 public class HardwareInfo
 {
     public required string CpuId { get; set; }
@@ -23,6 +31,8 @@ public class ActivateRequest
     public required HardwareInfo Hardware { get; set; }
     public string? AppVersion { get; set; }
     public DateTime ClientTimestampUtc { get; set; }
+    public Guid? VersionId { get; set; }
+    public LicenseStatus? Status { get; set; }
 }
 
 public class CheckinRequest
@@ -60,9 +70,6 @@ public class ApiResult
     public ActivationResultData? Data { get; set; }
 }
 
-// Mirrors LicensingApi.Dtos.ResultCode — kept in sync by hand since this app
-// deliberately has no project reference to the server (it only knows the wire
-// contract, exactly like a real external client tool would).
 public enum ResultCode
 {
     Activated, PendingReview, Renewed, Locked,

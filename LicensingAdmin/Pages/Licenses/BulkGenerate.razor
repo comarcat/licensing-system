@@ -26,6 +26,10 @@ else
                 @foreach (var v in _versions) { <MudSelectItem Value="@v.Id">@v.Name</MudSelectItem> }
             </MudSelect>
             <MudNumericField @bind-Value="_quantity" Label="Cantidad" Min="1" Max="500" Required="true" />
+            <MudSelect T="LicenseStatus" @bind-Value="_status" Label="Estado">
+                <MudSelectItem Value="@LicenseStatus.Active">Active</MudSelectItem>
+                <MudSelectItem Value="@LicenseStatus.Test">Test</MudSelectItem>
+            </MudSelect>
             <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="GenerateBulk" Class="mt-4">Generar y Descargar</MudButton>
         </MudForm>
     </MudPaper>
@@ -40,6 +44,7 @@ else
     double _progress;
     List<SoftwareProduct> _products = new();
     List<ProductVersion> _versions = new();
+    LicenseStatus _status = LicenseStatus.Active;
     [Inject] IDbContextFactory<AppDbContext> DbFactory { get; set; } = default!;
     [Inject] BulkLicenseService BulkService { get; set; } = default!;
     [Inject] AuthenticationStateProvider AuthState { get; set; } = default!;
@@ -63,7 +68,7 @@ else
         _progress = 0;
         var progress = new Progress<double>(p => { _progress = p; StateHasChanged(); });
 
-        var (fileContent, _) = await BulkService.GenerateAsync(_productId, _versionId, _quantity, email, progress, CancellationToken.None);
+        var (fileContent, _) = await BulkService.GenerateAsync(_productId, _versionId, _quantity, _status, email, progress, CancellationToken.None);
 
         await JS.InvokeVoidAsync("downloadFileFromStream", $"licencias-{DateTime.UtcNow:yyyyMMdd}.xlsx", Convert.ToBase64String(fileContent));
         _isGenerating = false;

@@ -14,6 +14,7 @@ public class AppDbContext : DbContext
     public DbSet<AdminUser> AdminUsers => Set<AdminUser>();
     public DbSet<AuditLogEntry> AuditLogEntries => Set<AuditLogEntry>();
     public DbSet<NotificationConfig> NotificationConfigs => Set<NotificationConfig>();
+    public DbSet<EmailLogEntry> EmailLogEntries => Set<EmailLogEntry>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -30,7 +31,9 @@ public class AppDbContext : DbContext
             e.Property(x => x.DefaultMaxActivations).HasColumnName("default_max_activations");
             e.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc");
             e.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc");
+            e.Property(x => x.IsArchived).HasColumnName("is_archived");
             e.HasIndex(x => x.Name);
+            e.HasIndex(x => x.IsArchived);
 
             e.HasMany(x => x.Versions)
                 .WithOne(v => v.Product)
@@ -182,6 +185,19 @@ public class AppDbContext : DbContext
             e.Property(x => x.LastTestAtUtc).HasColumnName("last_test_at_utc");
             e.Property(x => x.EventTogglesJson).HasColumnName("event_toggles_json").HasColumnType("jsonb");
             e.Property(x => x.UpdatedAtUtc).HasColumnName("updated_at_utc");
+        });
+
+        // ---------------- EmailLogEntry ----------------
+        modelBuilder.Entity<EmailLogEntry>(e =>
+        {
+            e.ToTable("email_log_entries");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasColumnName("id");
+            e.Property(x => x.RecipientDomain).HasColumnName("recipient_domain").HasMaxLength(255).IsRequired();
+            e.Property(x => x.Status).HasColumnName("status").HasMaxLength(100).IsRequired();
+            e.Property(x => x.EmailType).HasColumnName("email_type").HasMaxLength(50).IsRequired();
+            e.Property(x => x.CreatedAtUtc).HasColumnName("created_at_utc");
+            e.HasIndex(x => x.CreatedAtUtc);
         });
     }
 }

@@ -12,31 +12,44 @@ namespace LicensingAdmin.Products;
 /// </summary>
 public interface IProductStore
 {
-    Task<IReadOnlyList<SoftwareProduct>> ListAsync(CancellationToken ct = default);
+    Task<IReadOnlyList<SoftwareProduct>> ListAsync(bool includeArchived = false, CancellationToken ct = default);
 
     Task<SoftwareProduct?> FindByIdAsync(Guid id, CancellationToken ct = default);
 
-    Task AddAsync(SoftwareProduct product, AuditLogEntry audit, CancellationToken ct = default);
+    Task AddAsync(SoftwareProduct product, AuditLogEntry auditProduct, ProductVersion version, AuditLogEntry auditVersion, CancellationToken ct = default);
 
     Task UpdateAsync(SoftwareProduct product, AuditLogEntry audit, CancellationToken ct = default);
 
     /// <summary>How many licenses currently reference this product — used to explain a refused delete.</summary>
     Task<int> CountLicensesAsync(Guid productId, CancellationToken ct = default);
 
+    Task ArchiveAsync(Guid productId, AuditLogEntry audit, CancellationToken ct = default);
+
     /// <exception cref="ProductInUseException">The product still has at least one license.</exception>
     Task DeleteAsync(Guid productId, AuditLogEntry audit, CancellationToken ct = default);
+
+    Task<IReadOnlyList<ProductVersion>> ListVersionsAsync(Guid productId, CancellationToken ct = default);
+
+    Task AddVersionAsync(ProductVersion version, AuditLogEntry audit, CancellationToken ct = default);
+
+    Task UpdateVersionAsync(ProductVersion version, AuditLogEntry audit, CancellationToken ct = default);
+
+    Task DeleteVersionAsync(Guid versionId, AuditLogEntry audit, CancellationToken ct = default);
 }
 
 /// <summary>EF Core-backed <see cref="IProductStore"/>. Not unit tested (thin EF adapter).</summary>
 public sealed class EfProductStore(IDbContextFactory<AppDbContext> factory) : IProductStore
 {
-    public async Task<IReadOnlyList<SoftwareProduct>> ListAsync(CancellationToken ct = default)
+    public async Task<IReadOnlyList<SoftwareProduct>> ListAsync(bool includeArchived = false, CancellationToken ct = default)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
-        return await db.SoftwareProducts
-            .AsNoTracking()
-            .OrderBy(p => p.Name)
-            .ToListAsync(ct);
+        var query = db.SoftwareProducts.AsNoTracking();
+        if (!includeArchived)
+        {
+            query = query.Where(p => !p.IsArchived);
+        }
+
+        return await query.OrderBy(p => p.Name).ToListAsync(ct);
     }
 
     public async Task<SoftwareProduct?> FindByIdAsync(Guid id, CancellationToken ct = default)
@@ -45,11 +58,13 @@ public sealed class EfProductStore(IDbContextFactory<AppDbContext> factory) : IP
         return await db.SoftwareProducts.FirstOrDefaultAsync(p => p.Id == id, ct);
     }
 
-    public async Task AddAsync(SoftwareProduct product, AuditLogEntry audit, CancellationToken ct = default)
+    public async Task AddAsync(SoftwareProduct product, AuditLogEntry auditProduct, ProductVersion version, AuditLogEntry auditVersion, CancellationToken ct = default)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
         db.SoftwareProducts.Add(product);
-        db.AuditLogEntries.Add(audit);
+        db.AuditLogEntries.Add(auditProduct);
+        db.ProductVersions.Add(version);
+        db.AuditLogEntries.Add(auditVersion);
         await db.SaveChangesAsync(ct);
     }
 
@@ -74,6 +89,18 @@ public sealed class EfProductStore(IDbContextFactory<AppDbContext> factory) : IP
         return await db.Licenses.CountAsync(l => l.ProductId == productId, ct);
     }
 
+    public async Task ArchiveAsync(Guid productId, AuditLogEntry audit, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var product = await db.SoftwareProducts.FirstOrDefaultAsync(p => p.Id == productId, ct)
+            ?? throw new InvalidOperationException($"No product with id '{productId}'.");
+
+        product.IsArchived = true;
+        product.UpdatedAtUtc = DateTime.UtcNow;
+        db.AuditLogEntries.Add(audit);
+        await db.SaveChangesAsync(ct);
+    }
+
     public async Task DeleteAsync(Guid productId, AuditLogEntry audit, CancellationToken ct = default)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
@@ -87,6 +114,50 @@ public sealed class EfProductStore(IDbContextFactory<AppDbContext> factory) : IP
         }
 
         db.SoftwareProducts.Remove(product);
+        db.AuditLogEntries.Add(audit);
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<ProductVersion>> ListVersionsAsync(Guid productId, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        return await db.ProductVersions
+            .Where(v => v.ProductId == productId)
+            .OrderBy(v => v.Name)
+            .ToListAsync(ct);
+    }
+
+    public async Task AddVersionAsync(ProductVersion version, AuditLogEntry audit, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        db.ProductVersions.Add(version);
+        db.AuditLogEntries.Add(audit);
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task UpdateVersionAsync(ProductVersion version, AuditLogEntry audit, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var existing = await db.ProductVersions.FirstOrDefaultAsync(v => v.Id == version.Id, ct)
+            ?? throw new InvalidOperationException($"No version with id '{version.Id}'.");
+        existing.Name = version.Name;
+        db.AuditLogEntries.Add(audit);
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task DeleteVersionAsync(Guid versionId, AuditLogEntry audit, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var version = await db.ProductVersions.FirstOrDefaultAsync(v => v.Id == versionId, ct)
+            ?? throw new InvalidOperationException($"No version with id '{versionId}'.");
+
+        var licenseCount = await db.Licenses.CountAsync(l => l.VersionId == versionId, ct);
+        if (licenseCount > 0)
+        {
+            throw new ProductInUseException(versionId, licenseCount);
+        }
+
+        db.ProductVersions.Remove(version);
         db.AuditLogEntries.Add(audit);
         await db.SaveChangesAsync(ct);
     }

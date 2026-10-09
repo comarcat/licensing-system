@@ -72,6 +72,8 @@ else
                     <td class="d-flex ga-2">
                         <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
                                        OnClick="@(() => EditAsync(p))" Disabled="@_busy" />
+                        <MudIconButton Icon="@Icons.Material.Filled.Archive" Size="Size.Small" Color="Color.Warning"
+                                        OnClick="@(() => ArchiveAsync(p))" Disabled="@_busy" />
                         <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
                                        OnClick="@(() => DeleteAsync(p))" Disabled="@_busy" />
                     </td>
@@ -194,6 +196,35 @@ else
             {
                 _busy = false;
             }
+        }
+    }
+
+    private async Task ArchiveAsync(SoftwareProduct product)
+    {
+        var confirmed = await DialogService.ShowMessageBox(
+            "Archivar producto",
+            $"¿Archivar \"{product.Name}\"? Ya no aparecerá en la lista activa.",
+            yesText: "Archivar", cancelText: "Cancelar");
+        if (confirmed != true) return;
+
+        var actor = await ActorOrNullAsync();
+        if (actor is null) return;
+
+        _busy = true;
+        try
+        {
+            await ProductSvc.ArchiveAsync(product.Id, actor);
+            Snackbar.Add("Producto archivado.", Severity.Success);
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning("Product archive failed: {Error}.", ex.GetType().Name);
+            Snackbar.Add("No se pudo archivar el producto.", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
         }
     }
 

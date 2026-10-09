@@ -1,5 +1,12 @@
+using System.Diagnostics;
+using System.Net.Sockets;
+using System.Security.Authentication;
+using LicensingCore.Data;
 using LicensingCore.Entities;
+using MailKit.Net.Smtp;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace LicensingAdmin.Notifications;
 
@@ -9,8 +16,14 @@ namespace LicensingAdmin.Notifications;
 /// see <see cref="Purpose"/>), and send a test email against whatever is currently saved.
 /// </summary>
 public sealed class NotificationConfigService(
-    INotificationConfigStore store, IDataProtectionProvider dataProtection, IEmailSender sender)
+    INotificationConfigStore store,
+    IDataProtectionProvider dataProtection,
+    IEmailSender sender,
+    ILogger<NotificationConfigService> logger,
+    IDbContextFactory<AppDbContext> dbFactory)
 {
+    private readonly IDbContextFactory<AppDbContext> _dbFactory = dbFactory;
+
     /// <summary>
     /// Data Protection purpose string for the SMTP password protector. Changing this
     /// string invalidates every previously-encrypted password (Data Protection ties the
@@ -85,8 +98,18 @@ public sealed class NotificationConfigService(
             plainPassword = System.Text.Encoding.UTF8.GetString(Protector.Unprotect(config.PasswordEncrypted));
         }
 
+        var sw = Stopwatch.StartNew();
+        string? recipientDomain = null;
+        var status = NotificationTestStatus.Success;
+
         try
         {
+            // Extract recipient domain for diagnostic logging (never log the full address).
+            var atIndex = toAddress.LastIndexOf('@');
+            recipientDomain = atIndex > 0 && atIndex < toAddress.Length - 1
+                ? toAddress[(atIndex + 1)..]
+                : "unknown";
+
             await sender.SendAsync(
                 config, plainPassword, toAddress,
                 "Correo de prueba — Miautrix Licensing System",
@@ -99,10 +122,58 @@ public sealed class NotificationConfigService(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            status = NotificationTestStatus.Failed;
+            sw.Stop();
             config.LastTestStatus = NotificationTestStatus.Failed;
             config.LastTestAtUtc = DateTime.UtcNow;
             await store.SaveAsync(config, ct);
-            throw;
+
+            // Diagnostic log: exception type, host, port, encryption, auth type, elapsed ms,
+            // recipient domain — NO password, NO full recipient address.
+            logger.LogWarning(
+                "Test email failed. ExceptionType={ExType}, SmtpHost={Host}, SmtpPort={Port}, " +
+                "Encryption={Enc}, AuthType={Auth}, ElapsedMs={Elapsed}, RecipientDomain={Domain}",
+                ex.GetType().Name, config.SmtpHost, config.SmtpPort,
+                config.Encryption, config.AuthType, sw.ElapsedMilliseconds, recipientDomain);
+
+            // Re-throw with a sanitized reason the UI can show.
+            throw new InvalidOperationException(
+                $"Error de conexión SMTP: {SanitizeFailureReason(ex)}", ex);
+        }
+        finally
+        {
+            await LogEmailAsync(recipientDomain ?? "unknown", status == NotificationTestStatus.Success ? "Success" : "Failed", "Test", ct);
         }
     }
+
+    private async Task LogEmailAsync(string domain, string status, string type, CancellationToken ct)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        db.EmailLogEntries.Add(new EmailLogEntry
+        {
+            Id = Guid.NewGuid(),
+            RecipientDomain = domain,
+            Status = status,
+            EmailType = type,
+            CreatedAtUtc = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>Returns a short, safe failure description — no password, no stack, no full address.</summary>
+    private static string SanitizeFailureReason(Exception ex) => ex switch
+    {
+        SmtpCommandException smtpEx => smtpEx.StatusCode switch
+        {
+            SmtpStatusCode.AuthenticationRequired => "Autenticación requerida",
+            SmtpStatusCode.MailboxUnavailable => "Buzón de destino no disponible",
+            SmtpStatusCode.TransactionFailed => "Transacción SMTP fallida",
+            _ => $"SMTP {smtpEx.StatusCode}",
+        },
+        SocketException => "No se pudo conectar al servidor SMTP",
+        System.IO.IOException ioe when ioe.InnerException is SocketException => "No se pudo conectar al servidor SMTP",
+        AuthenticationException => "Autenticación fallida",
+        TimeoutException => "Tiempo de espera agotado",
+        _ => ex.GetType().Name,
+    };
 }

@@ -19,12 +19,17 @@ public sealed class EfLicenseStore(IDbContextFactory<AppDbContext> factory) : IL
     }
 
     /// <inheritdoc />
-    public async Task AddAsync(SoftwareProduct? newProduct, License license, AuditLogEntry audit, CancellationToken ct = default)
+    public async Task AddAsync(SoftwareProduct? newProduct, ProductVersion? newVersion, License license, AuditLogEntry audit, CancellationToken ct = default)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
         if (newProduct is not null)
         {
             db.SoftwareProducts.Add(newProduct);
+        }
+
+        if (newVersion is not null)
+        {
+            db.Set<ProductVersion>().Add(newVersion);
         }
 
         db.Licenses.Add(license);

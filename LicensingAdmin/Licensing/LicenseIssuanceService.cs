@@ -1,6 +1,9 @@
+using LicensingAdmin.Notifications;
 using LicensingCore.Crypto;
 using LicensingCore.Entities;
 using LicensingCore.Licensing;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.Extensions.Logging;
 
 namespace LicensingAdmin.Licensing;
 
@@ -10,8 +13,16 @@ namespace LicensingAdmin.Licensing;
 /// hands the product/license/audit tuple to the <see cref="ILicenseStore"/> for one
 /// atomic write.
 /// </summary>
-public sealed class LicenseIssuanceService(ILicenseSigner signer, ILicenseStore store)
+public sealed class LicenseIssuanceService(
+    ILicenseSigner signer,
+    ILicenseStore store,
+    IEmailSender emailSender,
+    INotificationConfigStore configStore,
+    IDataProtectionProvider dataProtection,
+    ILogger<LicenseIssuanceService> logger)
 {
+    private IDataProtector Protector => dataProtection.CreateProtector(NotificationConfigService.Purpose);
+
     /// <summary>Upper bound on key-minting retries; a full store would otherwise spin forever.</summary>
     private const int MaxKeyMintAttempts = 8;
 
@@ -37,12 +48,24 @@ public sealed class LicenseIssuanceService(ILicenseSigner signer, ILicenseStore 
         ArgumentException.ThrowIfNullOrWhiteSpace(request.IssuedBy);
 
         // 1. Resolve the product: reuse an existing one, or build a new one to persist.
+        //    Also resolve the product version: for an existing product the caller must
+        //    supply a valid (non-empty) VersionId; for a new product a default version
+        //    is created automatically.
         SoftwareProduct? newProduct;
+        ProductVersion? newVersion;
         Guid productId;
+        Guid versionId;
         if (request.ExistingProductId is { } pid)
         {
             newProduct = null;
             productId = pid;
+
+            if (request.VersionId is null || request.VersionId.Value == Guid.Empty)
+                throw new ArgumentException(
+                    "VersionId is required when issuing against an existing product.",
+                    nameof(request.VersionId));
+            versionId = request.VersionId.Value;
+            newVersion = null;
         }
         else
         {
@@ -60,6 +83,16 @@ public sealed class LicenseIssuanceService(ILicenseSigner signer, ILicenseStore 
                 DefaultMaxActivations = request.MaxActivations,
             };
             productId = newProduct.Id;
+
+            // Auto-create a default version for the new product so the license always
+            // has a valid FK target.
+            newVersion = new ProductVersion
+            {
+                Id = Guid.NewGuid(),
+                ProductId = productId,
+                Name = "Default",
+            };
+            versionId = newVersion.Id;
         }
 
         // 2. Mint a key, retrying until the store confirms it is free. A full store (or a
@@ -83,11 +116,12 @@ public sealed class LicenseIssuanceService(ILicenseSigner signer, ILicenseStore 
         {
             Id = Guid.NewGuid(),
             ProductId = productId,
-            VersionId = request.VersionId ?? Guid.Empty,
+            VersionId = versionId,
             LicenseKey = key,
             ModelSnapshot = request.Model,
             MaxActivations = request.MaxActivations,
             SubscriptionExpiryUtc = request.SubscriptionExpiryUtc,
+            Status = request.Status,
             CustomerEmail = request.CustomerEmail,
             CustomerName = request.CustomerName,
             Signature = Array.Empty<byte>(),
@@ -104,10 +138,38 @@ public sealed class LicenseIssuanceService(ILicenseSigner signer, ILicenseStore 
             Action = "Created",
         };
 
-        // 5. One atomic write of product (optional) + license + audit.
-        await store.AddAsync(newProduct, license, audit, ct);
+        // 5. One atomic write of product/version (optional) + license + audit.
+        await store.AddAsync(newProduct, newVersion, license, audit, ct);
 
         // 6. Hand the caller the signed, persisted license.
+        if (!string.IsNullOrWhiteSpace(license.CustomerEmail))
+        {
+            await SafelySendNotificationAsync(license, ct);
+        }
+
         return license;
+    }
+
+    private async Task SafelySendNotificationAsync(License license, CancellationToken ct)
+    {
+        try
+        {
+            var config = await configStore.GetAsync(ct);
+            if (config is null) return;
+            string? password = config.PasswordEncrypted.Length > 0
+                ? System.Text.Encoding.UTF8.GetString(Protector.Unprotect(config.PasswordEncrypted))
+                : null;
+
+            await emailSender.SendAsync(
+                config, password, license.CustomerEmail!,
+                "Licencia emitida — Miautrix Licensing System",
+                $"Se ha emitido una nueva licencia:\n\nClave: {license.LicenseKey}\nProducto: {license.ProductId}\n\nGracias.",
+                ct);
+            logger.LogInformation("Issuance notification sent to {Email}.", license.CustomerEmail);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to send issuance notification to {Email}.", license.CustomerEmail);
+        }
     }
 }

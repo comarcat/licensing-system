@@ -25,6 +25,7 @@ public sealed class LicenseExportService(IDbContextFactory<AppDbContext> factory
 
         var licenses = await db.Licenses
             .Include(l => l.Product)
+            .Include(l => l.Version)
             .Include(l => l.Activations)
             .OrderBy(l => l.Product.Name).ThenBy(l => l.LicenseKey)
             .ToListAsync(ct);
@@ -34,7 +35,7 @@ public sealed class LicenseExportService(IDbContextFactory<AppDbContext> factory
         var licensesSheet = workbook.Worksheets.Add("Licenses");
         string[] licenseHeaders =
         [
-            "License Key", "Product", "Model", "Max Activations", "Used Activations",
+            "License Key", "Product", "Version", "Model", "Max Activations", "Used Activations",
             "Status", "Subscription Expiry (UTC)", "Days Until Expiry", "Customer Name",
             "Customer Email", "Created (UTC)", "Revoked (UTC)", "Revoked Reason",
         ];
@@ -54,17 +55,18 @@ public sealed class LicenseExportService(IDbContextFactory<AppDbContext> factory
 
             licensesSheet.Cell(row, 1).Value = l.LicenseKey;
             licensesSheet.Cell(row, 2).Value = l.Product.Name;
-            licensesSheet.Cell(row, 3).Value = l.ModelSnapshot.ToString();
-            licensesSheet.Cell(row, 4).Value = l.MaxActivations;
-            licensesSheet.Cell(row, 5).Value = used;
-            licensesSheet.Cell(row, 6).Value = l.Status.ToString();
-            licensesSheet.Cell(row, 7).Value = l.SubscriptionExpiryUtc?.ToString("yyyy-MM-dd") ?? "";
-            licensesSheet.Cell(row, 8).Value = daysUntilExpiry;
-            licensesSheet.Cell(row, 9).Value = l.CustomerName ?? "";
-            licensesSheet.Cell(row, 10).Value = l.CustomerEmail ?? "";
-            licensesSheet.Cell(row, 11).Value = l.CreatedAtUtc.ToString("yyyy-MM-dd HH:mm");
-            licensesSheet.Cell(row, 12).Value = l.RevokedAtUtc?.ToString("yyyy-MM-dd HH:mm") ?? "";
-            licensesSheet.Cell(row, 13).Value = l.RevokedReason ?? "";
+            licensesSheet.Cell(row, 3).Value = l.Version.Name;
+            licensesSheet.Cell(row, 4).Value = l.ModelSnapshot.ToString();
+            licensesSheet.Cell(row, 5).Value = l.MaxActivations;
+            licensesSheet.Cell(row, 6).Value = used;
+            licensesSheet.Cell(row, 7).Value = l.Status.ToString();
+            licensesSheet.Cell(row, 8).Value = l.SubscriptionExpiryUtc?.ToString("yyyy-MM-dd") ?? "";
+            licensesSheet.Cell(row, 9).Value = daysUntilExpiry;
+            licensesSheet.Cell(row, 10).Value = l.CustomerName ?? "";
+            licensesSheet.Cell(row, 11).Value = l.CustomerEmail ?? "";
+            licensesSheet.Cell(row, 12).Value = l.CreatedAtUtc.ToString("yyyy-MM-dd HH:mm");
+            licensesSheet.Cell(row, 13).Value = l.RevokedAtUtc?.ToString("yyyy-MM-dd HH:mm") ?? "";
+            licensesSheet.Cell(row, 14).Value = l.RevokedReason ?? "";
             row++;
         }
         licensesSheet.Row(1).Style.Font.Bold = true;

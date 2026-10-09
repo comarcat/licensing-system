@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "LicensingSystem v2.0",
+    "subtitle": "Activación de licencias · .NET 10 · PostgreSQL 15+",
+    "quality_profile": "showcase",
+    "views": [
+      { "id": "admin-flow", "label": "Admin panel flow", "focus": ["browser", "admin", "db"], "note": "El administrador emite y gestiona licencias a través del panel Blazor." },
+      { "id": "activation-flow", "label": "Activación desde cliente", "focus": ["client-dll", "api", "db"], "note": "El software del cliente final activa y verifica su licencia contra la API." }
+    ]
+  },
+  "components": [
+    { "id": "browser", "type": "external", "label": "Admin Browser", "sublabel": "Chrome / Edge", "pos": [40, 220], "size": [130, 60] },
+    { "id": "admin", "type": "backend", "label": "LicensingAdmin", "sublabel": "Blazor Server · :443", "pos": [280, 220], "size": [150, 64], "tag": "MudBlazor 7" },
+    { "id": "api", "type": "backend", "label": "LicensingApi", "sublabel": "Web API · :8080", "pos": [280, 400], "size": [150, 64] },
+    { "id": "db", "type": "database", "label": "PostgreSQL", "sublabel": "licensing_db :5432", "pos": [540, 310], "size": [140, 60] },
+    { "id": "client-dll", "type": "external", "label": "Client DLL", "sublabel": "SW del cliente final", "pos": [40, 400], "size": [130, 64] }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "Windows Server / IIS", "wraps": ["admin", "api"] }
+  ],
+  "connections": [
+    { "id": "browser-to-admin", "from": "browser", "to": "admin", "label": "HTTPS · SignalR", "variant": "emphasis" },
+    { "id": "admin-to-db", "from": "admin", "to": "db", "label": "EF Core · SQL" },
+    { "id": "client-to-api", "from": "client-dll", "to": "api", "label": "POST /api/activate", "variant": "emphasis" },
+    { "id": "api-to-db", "from": "api", "to": "db", "label": "EF Core · SQL" }
+  ],
+  "cards": [
+    { "dot": "emerald", "title": "v2.0 — Novedades", "items": ["Product Versions (free / premium / enterprise)", "Bulk license generation with Excel export", "Migración .NET 8 → .NET 10 LTS"] },
+    { "dot": "cyan", "title": "Retrocompatibilidad", "items": ["VersionId opcional — default Guid.Empty si se omite", "Todos los clientes v1.0 funcionan sin cambios", "428 tests passing, firmas RSA-SHA256 intactas"] },
+    { "dot": "violet", "title": "Deployment", "items": ["pg_dump + tar backup pre-deploy", "Systemd units con EnvironmentFile cifrado", "nginx reverse proxy + Cloudflare Tunnel"] }
+  ]
+}

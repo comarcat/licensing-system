@@ -539,6 +539,85 @@ public sealed class ActivationServiceTests : IDisposable
         Assert.Null(reloaded.RejectedAtUtc);
     }
 
+    // ---------------------------------------------------------------------
+    // Test license — bypasses max-activation, review, and subscription blocks
+    // ---------------------------------------------------------------------
+
+    [Fact]
+    public async Task Activate_TestLicense_ApprovesWithoutMaxActivationsCheck()
+    {
+        var license = await SeedLicenseAsync(LicenseStatus.Test, maxActivations: 0);
+
+        var result = await _service.ActivateAsync(new ActivateRequest
+        {
+            LicenseKey = license.LicenseKey,
+            InstallGuid = Guid.NewGuid(),
+            Hardware = Hw(),
+        }, Ct);
+
+        Assert.True(result.Success);
+        Assert.Equal(ResultCode.Activated, result.Code);
+        Assert.Equal("approved", result.Data!.Status);
+    }
+
+    [Fact]
+    public async Task Activate_TestLicense_ApprovesWhenAtMaxActivations()
+    {
+        var license = await SeedLicenseAsync(LicenseStatus.Test, maxActivations: 1);
+        await SeedActivationAsync(license, Hw("1"), ActivationStatus.Approved);
+
+        var result = await _service.ActivateAsync(new ActivateRequest
+        {
+            LicenseKey = license.LicenseKey,
+            InstallGuid = Guid.NewGuid(),
+            Hardware = Hw("2"),
+        }, Ct);
+
+        Assert.True(result.Success);
+        Assert.Equal(ResultCode.Activated, result.Code);
+        Assert.Equal("approved", result.Data!.Status);
+        Assert.Equal(2, await _db.Activations.CountAsync(Ct));
+    }
+
+    [Fact]
+    public async Task Checkin_TestLicense_SkipsSubscriptionExpiry()
+    {
+        var license = await SeedLicenseAsync(LicenseStatus.Test, subscriptionExpiryUtc: DateTime.UtcNow.AddDays(-90));
+        var hw = Hw();
+        var activation = await SeedActivationAsync(license, hw, ActivationStatus.Approved);
+
+        var result = await _service.CheckinAsync(new CheckinRequest
+        {
+            ActivationId = activation.Id,
+            InstallGuid = activation.InstallGuid,
+            Hardware = hw,
+        }, Ct);
+
+        Assert.True(result.Success);
+        Assert.Equal(ResultCode.Renewed, result.Code);
+    }
+
+    [Fact]
+    public async Task Activate_TestLicense_NewInstallCreatesApprovedActivation()
+    {
+        var license = await SeedLicenseAsync(LicenseStatus.Test);
+
+        var result = await _service.ActivateAsync(new ActivateRequest
+        {
+            LicenseKey = license.LicenseKey,
+            InstallGuid = Guid.NewGuid(),
+            Hardware = Hw(),
+        }, Ct);
+
+        Assert.True(result.Success);
+        Assert.Equal(ResultCode.Activated, result.Code);
+        Assert.Equal("approved", result.Data!.Status);
+
+        var activation = await _db.Activations.FirstAsync(Ct);
+        Assert.Equal(ActivationStatus.Approved, activation.Status);
+        Assert.Null(activation.ReviewDeadlineUtc);
+    }
+
     [Fact]
     public async Task Activate_SameInstallGuidDifferentHardwareThanItsApprovedRecord_ReopensReviewOnThatRowInsteadOfCrashing()
     {

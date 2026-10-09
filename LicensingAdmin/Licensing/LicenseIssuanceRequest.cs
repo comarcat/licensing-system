@@ -43,6 +43,13 @@ public sealed record LicenseIssuanceRequest
     /// <summary>Optional VersionId for the license.</summary>
     public Guid? VersionId { get; init; }
 
+    /// <summary>
+    /// Initial status of the issued key. <see cref="LicenseStatus.Active"/> (default) enforces
+    /// every API rule; <see cref="LicenseStatus.Test"/> bypasses max-activation, review and
+    /// subscription blocks at activation.
+    /// </summary>
+    public LicenseStatus Status { get; init; } = LicenseStatus.Active;
+
     /// <summary>Email of the admin performing the issuance; written to <see cref="AuditLogEntry.Actor"/>.</summary>
     public required string IssuedBy { get; init; }
 }

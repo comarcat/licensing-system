@@ -40,12 +40,16 @@ public class LicenseIssuanceServiceTests
         LicenseModel? model = null,
         int maxActivations = 7,
         DateTime? subscriptionExpiryUtc = null,
+        Guid? versionId = null,
         string issuedBy = "admin@vendor.test") => new()
     {
         ExistingProductId = useExistingProduct ? Guid.NewGuid() : null,
         NewProductName = newProductName,
         NewProductVendor = newProductVendor,
         NewProductVersion = newProductVersion,
+        // When useExistingProduct is true and caller didn't pass a versionId, auto-generate one.
+        // Tests that want to test null/empty override with 'with { VersionId = ... }'.
+        VersionId = versionId ?? (useExistingProduct ? Guid.NewGuid() : null),
         Model = model ?? (LicenseModel.Machine | LicenseModel.Subscription),
         MaxActivations = maxActivations,
         SubscriptionExpiryUtc =
@@ -287,6 +291,68 @@ public class LicenseIssuanceServiceTests
     }
 
     // ---------------------------------------------------------------------
+    // Product version (v2.0) — mandatory for existing products, auto-created
+    // for new products.
+    // ---------------------------------------------------------------------
+
+    /// <summary>
+    /// When issuing against an existing product a non-null, non-empty VersionId
+    /// is required; omitting it (null or <see cref="Guid.Empty"/>) is refused.
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("empty")]
+    public async Task IssueAsync_ExistingProductWithoutVersionId_Throws(string? caseName)
+    {
+        var store = new FakeLicenseStore();
+        var request = NewRequest(useExistingProduct: true) with
+        {
+            VersionId = caseName == "empty" ? Guid.Empty : null,
+        };
+
+        await Assert.ThrowsAnyAsync<ArgumentException>(
+            () => NewService(store).IssueAsync(request, Ct));
+        Assert.Empty(store.Audits);
+    }
+
+    /// <summary>
+    /// When issuing against an existing product the VersionId from the request
+    /// is copied verbatim onto the license.
+    /// </summary>
+    [Fact]
+    public async Task IssueAsync_ExistingProduct_CopiesVersionId()
+    {
+        var store = new FakeLicenseStore();
+        var versionId = Guid.NewGuid();
+        var request = NewRequest(useExistingProduct: true, versionId: versionId);
+
+        var result = await NewService(store).IssueAsync(request, Ct);
+
+        Assert.Equal(versionId, result.VersionId);
+    }
+
+    /// <summary>
+    /// When creating a new product a default <see cref="ProductVersion"/> is
+    /// built and forwarded to the store alongside the new product.
+    /// </summary>
+    [Fact]
+    public async Task IssueAsync_NewProduct_CreatesDefaultVersion()
+    {
+        var store = new FakeLicenseStore();
+        var request = NewRequest(
+            useExistingProduct: false,
+            newProductName: "Test",
+            newProductVendor: "Test Inc");
+
+        var result = await NewService(store).IssueAsync(request, Ct);
+
+        Assert.NotNull(store.AddedVersion);
+        Assert.Equal("Default", store.AddedVersion!.Name);
+        Assert.Equal(result.ProductId, store.AddedVersion.ProductId);
+        Assert.Equal(result.VersionId, store.AddedVersion.Id);
+    }
+
+    // ---------------------------------------------------------------------
     // Service-boundary guards (security-auditor M-1 / B-1 / B-3).
     // ---------------------------------------------------------------------
 
@@ -326,6 +392,34 @@ public class LicenseIssuanceServiceTests
     }
 
     /// <summary>
+    /// When issuing an existing product, the license Status defaults to Active.
+    /// </summary>
+    [Fact]
+    public async Task IssueAsync_DefaultStatusIsActive()
+    {
+        var store = new FakeLicenseStore();
+        var result = await NewService(store).IssueAsync(NewRequest(), Ct);
+
+        Assert.Equal(LicenseStatus.Active, result.Status);
+        Assert.Equal(LicenseStatus.Active, store.AddedLicense!.Status);
+    }
+
+    /// <summary>
+    /// When Test status is requested, the license stores Test.
+    /// </summary>
+    [Fact]
+    public async Task IssueAsync_TestStatusPropagated()
+    {
+        var store = new FakeLicenseStore();
+        var request = NewRequest() with { Status = LicenseStatus.Test };
+
+        var result = await NewService(store).IssueAsync(request, Ct);
+
+        Assert.Equal(LicenseStatus.Test, result.Status);
+        Assert.Equal(LicenseStatus.Test, store.AddedLicense!.Status);
+    }
+
+    /// <summary>
     /// In-memory <see cref="ILicenseStore"/>: <see cref="LicenseKeyExistsAsync"/> replays
     /// <see cref="ExistsResults"/> (defaulting to <c>false</c> once drained) and records every
     /// probed key; <see cref="AddAsync"/> captures its arguments for assertions.
@@ -352,12 +446,15 @@ public class LicenseIssuanceServiceTests
             return Task.FromResult(exists);
         }
 
-        public Task AddAsync(SoftwareProduct? newProduct, License license, AuditLogEntry audit, CancellationToken ct = default)
+        public Task AddAsync(SoftwareProduct? newProduct, ProductVersion? newVersion, License license, AuditLogEntry audit, CancellationToken ct = default)
         {
             AddedProduct = newProduct;
+            AddedVersion = newVersion;
             AddedLicense = license;
             Audits.Add(audit);
             return Task.CompletedTask;
         }
+
+        public ProductVersion? AddedVersion { get; private set; }
     }
 }

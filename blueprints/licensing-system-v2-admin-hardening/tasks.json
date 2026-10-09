@@ -1,0 +1,227 @@
+[
+  {
+    "id": "E1-T1",
+    "title": "Add v2 hardening status log",
+    "epic": "01-foundation-shell",
+    "dependencies": [],
+    "priority": "p0",
+    "acceptance": [
+      "WHEN the repository opens THE SYSTEM SHALL contain docs/v2-admin-hardening-status.md with a task/status table."
+    ],
+    "verify": ["test -f docs/v2-admin-hardening-status.md"],
+    "checkpoint": "step-01-status-log",
+    "files": ["docs/v2-admin-hardening-status.md"],
+    "status": "done"
+  },
+  {
+    "id": "E1-T2",
+    "title": "Expose v2 admin menu links",
+    "epic": "01-foundation-shell",
+    "dependencies": ["E1-T1"],
+    "priority": "p0",
+    "acceptance": [
+      "WHEN MainLayout renders for IssueAccess THE SYSTEM SHALL show links to single license, bulk licenses, products, and docs.",
+      "WHEN MainLayout renders for AdminUserAccess THE SYSTEM SHALL show SMTP and users links."
+    ],
+    "verify": ["dotnet build LicensingSystem.sln"],
+    "checkpoint": "step-02-menu-links",
+    "files": ["LicensingAdmin/Shared/MainLayout.razor", "LicensingAdmin/Pages/Admin/Docs.razor"],
+    "status": "done"
+  },
+  {
+    "id": "E1-T3",
+    "title": "Add additive archive migration",
+    "epic": "01-foundation-shell",
+    "dependencies": ["E1-T1"],
+    "priority": "p0",
+    "acceptance": [
+      "WHEN the migration is run twice THE SYSTEM SHALL keep software_products.is_archived present without duplicate-object failure.",
+      "WHEN verification SELECTs run THE SYSTEM SHALL report archived column present."
+    ],
+    "verify": ["dotnet build LicensingSystem.sln"],
+    "checkpoint": "step-03-product-archive-schema",
+    "files": ["infra/migrate-v2-admin-hardening.sql", "LicensingCore/Entities/SoftwareProduct.cs", "LicensingCore/Data/AppDbContext.cs", "LicensingApi/Migrations/001_initial_schema.sql"],
+    "status": "done"
+  },
+  {
+    "id": "E1-T4",
+    "title": "Implement product archive service",
+    "epic": "01-foundation-shell",
+    "dependencies": ["E1-T3"],
+    "priority": "p0",
+    "acceptance": [
+      "WHEN ProductService archives a product THE SYSTEM SHALL set IsArchived true and write an AuditLogEntry with actor email.",
+      "WHEN products are listed for normal admin use THE SYSTEM SHALL exclude archived products by default."
+    ],
+    "verify": ["dotnet test --filter ProductService"],
+    "checkpoint": "step-04-product-archive-service",
+    "files": ["LicensingAdmin/Products/ProductService.cs", "LicensingAdmin/Products/IProductStore.cs", "LicensingSystem.Tests/ProductServiceTests.cs"],
+    "status": "done"
+  },
+  {
+    "id": "E2-T1",
+    "title": "Add product version service CRUD",
+    "epic": "02-product-versions-issuance",
+    "dependencies": ["E1-T4"],
+    "priority": "p0",
+    "acceptance": [
+      "WHEN a version name is submitted for a product THE SYSTEM SHALL persist a ProductVersion linked to that product and write audit.",
+      "WHEN deleting a referenced ProductVersion THE SYSTEM SHALL refuse with a clear domain exception."
+    ],
+    "verify": ["dotnet test --filter ProductVersion"],
+    "checkpoint": "step-05-version-service",
+    "files": ["LicensingAdmin/Products/ProductService.cs", "LicensingAdmin/Products/IProductStore.cs", "LicensingSystem.Tests/ProductVersionServiceTests.cs"],
+    "status": "done"
+  },
+  {
+    "id": "E2-T2",
+    "title": "Update Products UI for versions",
+    "epic": "02-product-versions-issuance",
+    "dependencies": ["E2-T1"],
+    "priority": "p0",
+    "acceptance": [
+      "WHEN admin opens Products THE SYSTEM SHALL show each product's version rows and an add-version control.",
+      "WHEN admin archives a product THE SYSTEM SHALL confirm the action and remove it from the normal table."
+    ],
+    "verify": ["dotnet build LicensingSystem.sln"],
+    "checkpoint": "step-06-products-ui",
+    "files": ["LicensingAdmin/Pages/Admin/Products.razor", "LicensingAdmin/Pages/Admin/EditProductDialog.razor"],
+    "status": "done"
+  },
+  {
+    "id": "E2-T3",
+    "title": "Harden single license issuance",
+    "epic": "02-product-versions-issuance",
+    "dependencies": ["E2-T1"],
+    "priority": "p0",
+    "acceptance": [
+      "WHEN issuing for an existing product THE SYSTEM SHALL reject null or Guid.Empty VersionId before SaveChanges.",
+      "WHEN issuing a new product THE SYSTEM SHALL create a Default ProductVersion and assign license.VersionId to it.",
+      "WHEN issuing a key THE SYSTEM SHALL allow selecting Active or Test status."
+    ],
+    "verify": ["dotnet test --filter LicenseIssuanceServiceTests"],
+    "checkpoint": "step-07-single-issuance",
+    "files": ["LicensingAdmin/Licensing/LicenseIssuanceService.cs", "LicensingAdmin/Licensing/LicenseIssuanceRequest.cs", "LicensingAdmin/Pages/Licenses/New.razor", "LicensingSystem.Tests/LicenseIssuanceServiceTests.cs"],
+    "status": "done"
+  },
+  {
+    "id": "E2-T4",
+    "title": "Harden bulk license issuance",
+    "epic": "02-product-versions-issuance",
+    "dependencies": ["E2-T1", "E1-T2"],
+    "priority": "p0",
+    "acceptance": [
+      "WHEN bulk page is opened THE SYSTEM SHALL require product and ProductVersion before generation.",
+      "WHEN bulk keys are generated THE SYSTEM SHALL use the selected VersionId and selected Active/Test status for every key."
+    ],
+    "verify": ["dotnet build LicensingSystem.sln", "dotnet test --filter BulkLicense"],
+    "checkpoint": "step-08-bulk-issuance",
+    "files": ["LicensingAdmin/Pages/Licenses/BulkGenerate.razor", "LicensingAdmin/Services/BulkLicenseService.cs", "LicensingSystem.Tests/BulkLicenseServiceTests.cs"],
+    "status": "done"
+  },
+  {
+    "id": "E3-T1",
+    "title": "Implement test-license API bypass",
+    "epic": "03-api-smtp-docs-compatibility",
+    "dependencies": ["E2-T3"],
+    "priority": "p0",
+    "acceptance": [
+      "WHEN a Test license is activated THE SYSTEM SHALL approve activation without max-activation, review, or subscription blocks.",
+      "WHEN an Active license is activated THE SYSTEM SHALL preserve existing rule enforcement."
+    ],
+    "verify": ["dotnet test --filter ActivationService"],
+    "checkpoint": "step-09-test-license-api",
+    "files": ["LicensingCore/Entities/Enums.cs", "LicensingApi/Services/ActivationService.cs", "LicensingSystem.Tests/ActivationServiceTests.cs"],
+    "status": "pending"
+  },
+  {
+    "id": "E3-T2",
+    "title": "Add SMTP diagnostics",
+    "epic": "03-api-smtp-docs-compatibility",
+    "dependencies": ["E1-T1"],
+    "priority": "p0",
+    "acceptance": [
+      "WHEN test email fails THE SYSTEM SHALL show a sanitized failure reason in the UI.",
+      "WHEN test email fails THE SYSTEM SHALL log exception type, host, port, encryption, auth type, elapsed ms, and recipient domain without logging password."
+    ],
+    "verify": ["dotnet test --filter NotificationConfigServiceTests"],
+    "checkpoint": "step-10-smtp-diagnostics",
+    "files": ["LicensingAdmin/Notifications/NotificationConfigService.cs", "LicensingAdmin/Pages/Admin/NotificationSettings.razor", "LicensingSystem.Tests/NotificationConfigServiceTests.cs"],
+    "status": "pending"
+  },
+  {
+    "id": "E3-T3",
+    "title": "Add email audit foundation",
+    "epic": "03-api-smtp-docs-compatibility",
+    "dependencies": ["E3-T2"],
+    "priority": "p1",
+    "acceptance": [
+      "WHEN a test or key email send is attempted THE SYSTEM SHALL record recipient, status, type, timestamp, and sanitized error if any.",
+      "WHEN email audit persists THE SYSTEM SHALL not store SMTP password or private key material."
+    ],
+    "verify": ["dotnet test --filter EmailLog"],
+    "checkpoint": "step-11-email-audit",
+    "files": ["LicensingCore/Entities/EmailLogEntry.cs", "LicensingCore/Data/AppDbContext.cs", "LicensingAdmin/Notifications/NotificationConfigService.cs", "infra/migrate-v2-admin-hardening.sql", "LicensingSystem.Tests/EmailLogTests.cs"],
+    "status": "pending"
+  },
+  {
+    "id": "E3-T4",
+    "title": "Add admin docs portal",
+    "epic": "03-api-smtp-docs-compatibility",
+    "dependencies": ["E1-T2"],
+    "priority": "p1",
+    "acceptance": [
+      "WHEN admin opens Docs THE SYSTEM SHALL list integration docs and downloadable client artifacts.",
+      "WHEN a doc link is clicked THE SYSTEM SHALL return a static file from the admin app."
+    ],
+    "verify": ["dotnet build LicensingSystem.sln"],
+    "checkpoint": "step-12-docs-portal",
+    "files": ["LicensingAdmin/Pages/Admin/Docs.razor", "LicensingAdmin/Shared/MainLayout.razor", "LicensingAdmin/wwwroot/docs/README.md"],
+    "status": "pending"
+  },
+  {
+    "id": "E3-T5",
+    "title": "Update HelloWorld compatibility harness",
+    "epic": "03-api-smtp-docs-compatibility",
+    "dependencies": ["E3-T1"],
+    "priority": "p0",
+    "acceptance": [
+      "WHEN HelloWorld runs in new mode THE SYSTEM SHALL send VersionId in ActivateRequest.",
+      "WHEN HelloWorld runs in old-schema mode THE SYSTEM SHALL omit VersionId from the activation payload."
+    ],
+    "verify": ["dotnet build LicensingSystem.sln"],
+    "checkpoint": "step-13-helloworld-harness",
+    "files": ["ActivationHelloWorld/Program.cs", "ActivationHelloWorld/ApiClient.cs", "docs/activation-dll-integration-reference.md"],
+    "status": "pending"
+  },
+  {
+    "id": "E3-T6",
+    "title": "Add API compatibility tests",
+    "epic": "03-api-smtp-docs-compatibility",
+    "dependencies": ["E3-T1", "E3-T5"],
+    "priority": "p0",
+    "acceptance": [
+      "WHEN compatibility tests run THE SYSTEM SHALL prove matching VersionId activates and mismatched VersionId returns InvalidKeyFormat.",
+      "WHEN compatibility tests run THE SYSTEM SHALL prove old-schema payload without VersionId still activates default-version license."
+    ],
+    "verify": ["dotnet test --filter Compatibility"],
+    "checkpoint": "step-14-api-compatibility",
+    "files": ["LicensingSystem.Tests/ActivationCompatibilityTests.cs"],
+    "status": "pending"
+  },
+  {
+    "id": "E3-T7",
+    "title": "Finalize docs and gate",
+    "epic": "03-api-smtp-docs-compatibility",
+    "dependencies": ["E2-T4", "E3-T3", "E3-T4", "E3-T6"],
+    "priority": "p0",
+    "acceptance": [
+      "WHEN final gate runs THE SYSTEM SHALL build and test successfully.",
+      "WHEN docs are reviewed THE SYSTEM SHALL describe menu modules, version management, test mode, SMTP diagnostics, docs portal, archive behavior, and compatibility testing."
+    ],
+    "verify": ["dotnet build LicensingSystem.sln", "dotnet test"],
+    "checkpoint": "step-15-final-docs-gate",
+    "files": ["docs/activation-dll-integration-reference.md", "docs/v2-admin-hardening-status.md", "infra/README.md"],
+    "status": "pending"
+  }
+]

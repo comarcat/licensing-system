@@ -172,6 +172,13 @@ else
             _lastTestAtUtc = DateTime.UtcNow;
             Snackbar.Add("Correo de prueba enviado.", Severity.Success);
         }
+        catch (InvalidOperationException ex) when (ex.Message.StartsWith("Error de conexión SMTP:"))
+        {
+            _lastTestStatus = NotificationTestStatus.Failed;
+            _lastTestAtUtc = DateTime.UtcNow;
+            Logger.LogWarning("Test email send failed: {Error}.", ex.GetType().Name);
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
         catch (InvalidOperationException)
         {
             Snackbar.Add("Guarda la configuración antes de enviar una prueba.", Severity.Warning);

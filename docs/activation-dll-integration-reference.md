@@ -2,8 +2,8 @@
 
 **Audience:** the developer of the client-side activation tool (DLL/EXE) that runs on
 the end customer's machine and talks to `LicensingApi`.
-**Status:** matches the code in `LicensingApi` on `main` as of 2026-09-14 (post-closure
-bugfix round — a real production crash, see §8). Admin-facing endpoints (issue/revoke/
+**Status:** matches the code in `LicensingApi` on `main` as of 2026-10-07 (v2.0 — product
+versions, bulk generation, .NET 10 LTS). Admin-facing endpoints (issue/revoke/
 reports) are a separate, already-built surface in `LicensingAdmin` — this document
 covers only the two endpoints the client
 tool calls.
@@ -62,6 +62,7 @@ public class ActivateRequest
     public VmInfo? Vm { get; set; }                          // optional
     public string? AppVersion { get; set; }                  // optional, informational
     public DateTime ClientTimestampUtc { get; set; }
+    public Guid? VersionId { get; set; }                     // optional, retrocompatible (v2.0+)
 }
 
 public class HardwareInfo
@@ -161,7 +162,7 @@ public class PolicyDto
 | `PendingReview`          | 200 | New install, awaiting admin approval (up to `GraceDays`) |
 | `Renewed`                | 200 | Checkin succeeded, license file refreshed |
 | `Locked`                 | 200 | Checkin succeeded but the license is now locked — see `Reason` |
-| `InvalidKeyFormat`       | 400 | `LicenseKey` fails the format regex (§5) |
+| `InvalidKeyFormat`       | 400 | `LicenseKey` fails the format regex (§5), **or** (v2.0+) the request's `VersionId` doesn't match the version id stored on the license |
 | `LicenseNotFound`        | 404 | No license row for that key |
 | `ActivationNotFound`     | 404 | Checkin: unknown `ActivationId` |
 | `LicenseExpired`         | 403 | License row's own `Status` is `Expired` |
@@ -291,6 +292,12 @@ this document and the public key above.
 
 ## 6. Business rules the client should anticipate
 
+- **Product version mismatch** (v2.0+): if `ActivateRequest.VersionId` is set and differs
+  from the `VersionId` stored on the license, the server returns `InvalidKeyFormat` and
+  rejects the activation outright. **Retrocompatible**: omit `VersionId` (or send `null`)
+  and the server defaults to version 0 — every pre-v2.0 client is unaffected. The
+  `VersionId` is validated against the database, not the request alone; developers should
+  obtain the correct version id for their product from the admin panel.
 - **New install, no hardware match on record** → `PendingReview`. `ReviewDeadlineUtc` is
   15 days out. The license file's `Status` will be `pending_review` in this window —
   the client tool should decide its own local grace-period UX (e.g., run in a limited
@@ -352,7 +359,8 @@ Request:
     "ramGb": 32
   },
   "appVersion": "1.4.2",
-  "clientTimestampUtc": "2026-09-13T12:00:00Z"
+  "clientTimestampUtc": "2026-09-13T12:00:00Z",
+  "versionId": null
 }
 ```
 

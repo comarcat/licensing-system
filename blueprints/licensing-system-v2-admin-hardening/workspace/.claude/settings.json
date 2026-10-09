@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet restore LicensingSystem.sln)",
+      "Bash(dotnet build LicensingSystem.sln)",
+      "Bash(dotnet test)",
+      "Bash(dotnet test --filter *)",
+      "Bash(test -f docs/v2-admin-hardening-status.md)"
+    ]
+  }
+}

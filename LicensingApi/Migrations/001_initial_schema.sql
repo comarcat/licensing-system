@@ -14,9 +14,11 @@ CREATE TABLE software_products (
     default_license_model    integer NOT NULL DEFAULT 1,   -- LicenseModel flags, 1 = Machine
     default_max_activations  integer NOT NULL DEFAULT 5,
     created_at_utc           timestamptz NOT NULL DEFAULT now(),
-    updated_at_utc           timestamptz
+    updated_at_utc           timestamptz,
+    is_archived              boolean NOT NULL DEFAULT false
 );
 CREATE INDEX ix_software_products_name ON software_products (name);
+CREATE INDEX ix_software_products_is_archived ON software_products (is_archived);
 
 CREATE TABLE licenses (
     id                       uuid PRIMARY KEY DEFAULT gen_random_uuid(),

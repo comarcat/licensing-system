@@ -1,4 +1,10 @@
+@using LicensingAdmin.Auth
+@using LicensingAdmin.Products
 @using LicensingCore.Entities
+@using LicensingCore.Data
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Components.Authorization
+@using MudBlazor
 
 <MudDialog>
     <DialogContent>
@@ -28,6 +34,31 @@
                                  ValueChanged="@(v => Toggle(LicenseModel.Subscription, v))" />
                 </div>
             </MudItem>
+            <MudItem xs="12">
+                <MudDivider Class="my-2" />
+                <MudText Typo="Typo.h6">Versiones</MudText>
+                @if (Product.Id == Guid.Empty)
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Warning">Guarde el producto primero para gestionar versiones.</MudText>
+                }
+                else
+                {
+                    <MudTable Items="_versions" Dense="true" Hover="true">
+                        <HeaderContent>
+                            <MudTh>Nombre</MudTh>
+                            <MudTh></MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd>@context.Name</MudTd>
+                            <MudTd><MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteVersionAsync(context))" /></MudTd>
+                        </RowTemplate>
+                    </MudTable>
+                    <div class="d-flex gap-2 mt-2">
+                        <MudTextField @bind-Value="_newVersionName" Label="Nueva versión" Dense="true" />
+                        <MudButton OnClick="AddVersionAsync" Color="Color.Primary" Variant="Variant.Outlined" Class="mt-2">Añadir</MudButton>
+                    </div>
+                }
+            </MudItem>
         </MudGrid>
     </DialogContent>
     <DialogActions>
@@ -39,20 +70,61 @@
 @code {
     [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
     [Parameter] public SoftwareProduct Product { get; set; } = default!;
+    [Inject] private ProductService ProductSvc { get; set; } = default!;
+    [Inject] private AuthenticationStateProvider AuthState { get; set; } = default!;
+    [Inject] private ISnackbar Snackbar { get; set; } = default!;
 
     private string _name = "";
     private string _vendor = "";
     private string? _version;
     private LicenseModel _flags;
     private int _maxActivations;
+    private List<ProductVersion> _versions = new();
+    private string? _newVersionName;
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
         _name = Product.Name;
         _vendor = Product.Vendor;
         _version = Product.CurrentVersion;
         _flags = Product.DefaultLicenseModel;
         _maxActivations = Product.DefaultMaxActivations;
+        await LoadVersionsAsync();
+    }
+
+    private async Task LoadVersionsAsync() => _versions = (await ProductSvc.ListVersionsAsync(Product.Id)).ToList();
+
+    private async Task AddVersionAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newVersionName)) return;
+        var actor = await GetActorAsync();
+        if (actor is null) return;
+        await ProductSvc.CreateVersionAsync(Product.Id, _newVersionName, actor);
+        _newVersionName = null;
+        await LoadVersionsAsync();
+        Snackbar.Add("Versión creada.", Severity.Success);
+    }
+
+    private async Task DeleteVersionAsync(ProductVersion version)
+    {
+        var actor = await GetActorAsync();
+        if (actor is null) return;
+        try
+        {
+            await ProductSvc.DeleteVersionAsync(version.Id, actor);
+            await LoadVersionsAsync();
+            Snackbar.Add("Versión eliminada.", Severity.Success);
+        }
+        catch (ProductInUseException)
+        {
+            Snackbar.Add("No se puede eliminar: licencias la usan.", Severity.Error);
+        }
+    }
+
+    private async Task<string?> GetActorAsync()
+    {
+        var user = (await AuthState.GetAuthenticationStateAsync()).User;
+        return CurrentAdmin.Email(user) ?? throw new InvalidOperationException("No auth.");
     }
 
     private void Toggle(LicenseModel flag, bool value) =>

@@ -23,6 +23,8 @@ public class SoftwareProduct
 
     public DateTime? UpdatedAtUtc { get; set; }
 
+    public bool IsArchived { get; set; }
+
     public ICollection<License> Licenses { get; set; } = new List<License>();
 
     public ICollection<ProductVersion> Versions { get; set; } = new List<ProductVersion>();

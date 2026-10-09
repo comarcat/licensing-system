@@ -14,7 +14,8 @@ public interface ILicenseStore
 
     /// <summary>
     /// Persists <paramref name="license"/> and <paramref name="audit"/> together, plus
-    /// <paramref name="newProduct"/> when it is not <c>null</c>, in one transaction.
+    /// <paramref name="newProduct"/> and <paramref name="newVersion"/> when they are not
+    /// <c>null</c>, in one transaction.
     /// </summary>
-    Task AddAsync(SoftwareProduct? newProduct, License license, AuditLogEntry audit, CancellationToken ct = default);
+    Task AddAsync(SoftwareProduct? newProduct, ProductVersion? newVersion, License license, AuditLogEntry audit, CancellationToken ct = default);
 }

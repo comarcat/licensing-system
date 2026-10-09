@@ -6,6 +6,7 @@
 @using System.Linq
 @using LicensingAdmin.Auth
 @using LicensingAdmin.Licensing
+@using LicensingCore.Entities
 @using Microsoft.EntityFrameworkCore
 @attribute [Authorize(Policy = AuthPolicies.IssueAccess)]
 @inject IDbContextFactory<AppDbContext> DbFactory
@@ -70,7 +71,8 @@ else
             else
             {
                 <MudItem xs="12" md="8">
-                    <MudSelect T="Guid" @bind-Value="_existingProductId" Label="Producto"
+                    <MudSelect T="Guid" Value="@_existingProductId" ValueChanged="OnExistingProductChanged"
+                               Label="Producto"
                                Required="true" RequiredError="Elige un producto.">
                         @foreach (var p in _products)
                         {
@@ -83,6 +85,20 @@ else
                             No hay productos todavía — activa "Nuevo producto".
                         </MudText>
                     }
+                </MudItem>
+                <MudItem xs="12" md="8">
+                    <MudSelect T="Guid" @bind-Value="_versionId" Label="Versión"
+                               Required="true" RequiredError="Elige una versión."
+                               Disabled="@(_versions.Count == 0)">
+                        @if (_versions.Count == 0)
+                        {
+                            <MudSelectItem T="Guid" Value="@Guid.Empty">— Sin versiones —</MudSelectItem>
+                        }
+                        @foreach (var v in _versions)
+                        {
+                            <MudSelectItem T="Guid" Value="@v.Id">@v.Name</MudSelectItem>
+                        }
+                    </MudSelect>
                 </MudItem>
             }
 
@@ -112,6 +128,13 @@ else
             </MudItem>
 
             <MudItem xs="12" md="8">
+                <MudSelect T="LicenseStatus" @bind-Value="_status" Label="Estado">
+                    <MudSelectItem Value="@LicenseStatus.Active">Active</MudSelectItem>
+                    <MudSelectItem Value="@LicenseStatus.Test">Test</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+
+            <MudItem xs="12" md="8">
                 <MudButton OnClick="SubmitAsync" Variant="Variant.Filled" Color="Color.Primary"
                            Disabled="@_submitting" StartIcon="@Icons.Material.Filled.VpnKey">
                     @(_submitting ? "Emitiendo…" : "Emitir licencia")
@@ -138,6 +161,7 @@ else
     private bool _loading = true;
     private bool _submitting;
     private List<SoftwareProduct> _products = new();
+    private List<ProductVersion> _versions = new();
     private License? _issued;
 
     private bool _newProduct;
@@ -145,6 +169,7 @@ else
     private string? _newVendor;
     private string? _newVersion;
     private Guid _existingProductId;
+    private Guid _versionId;
 
     private bool _machine = true;
     private bool _user;
@@ -155,6 +180,7 @@ else
     private DateTime? _expiry;
     private string? _customerEmail;
     private string? _customerName;
+    private LicenseStatus _status = LicenseStatus.Active;
 
     protected override async Task OnInitializedAsync()
     {
@@ -171,6 +197,17 @@ else
         if (_floating) m |= LicenseModel.Floating;
         if (_subscription) m |= LicenseModel.Subscription;
         return m;
+    }
+
+    private async Task OnExistingProductChanged(Guid productId)
+    {
+        _existingProductId = productId;
+        _versionId = Guid.Empty;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _versions = await db.Set<ProductVersion>()
+            .Where(v => v.ProductId == productId)
+            .OrderBy(v => v.Name)
+            .ToListAsync();
     }
 
     private async Task SubmitAsync()
@@ -196,6 +233,11 @@ else
         else if (_existingProductId == Guid.Empty)
         {
             Snackbar.Add("Elige un producto o activa \"Nuevo producto\".", Severity.Warning);
+            return;
+        }
+        else if (_versionId == Guid.Empty)
+        {
+            Snackbar.Add("Elige una versión del producto.", Severity.Warning);
             return;
         }
 
@@ -244,6 +286,7 @@ else
             var request = new LicenseIssuanceRequest
             {
                 ExistingProductId = _newProduct ? null : _existingProductId,
+                VersionId = _newProduct ? null : _versionId,
                 NewProductName = _newProduct ? _newName!.Trim() : null,
                 NewProductVendor = _newProduct ? _newVendor!.Trim() : null,
                 NewProductVersion = string.IsNullOrWhiteSpace(_newVersion) ? null : _newVersion!.Trim(),
@@ -252,6 +295,7 @@ else
                 SubscriptionExpiryUtc = expiryUtc,
                 CustomerEmail = string.IsNullOrWhiteSpace(_customerEmail) ? null : _customerEmail!.Trim(),
                 CustomerName = string.IsNullOrWhiteSpace(_customerName) ? null : _customerName!.Trim(),
+                Status = _status,
                 IssuedBy = issuedBy,
             };
 
@@ -293,6 +337,8 @@ else
         _newProduct = false;
         _newName = _newVendor = _newVersion = null;
         _existingProductId = Guid.Empty;
+        _versionId = Guid.Empty;
+        _versions.Clear();
         _machine = true;
         _user = _floating = _subscription = false;
         _maxActivations = 5;

@@ -19,6 +19,7 @@ public enum LicenseStatus
     Active = 0,
     Revoked = 1,
     Expired = 2,
+    Test = 3,
 }
 
 public enum ActivationStatus

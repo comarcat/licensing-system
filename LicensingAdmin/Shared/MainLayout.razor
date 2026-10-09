@@ -39,7 +39,13 @@
                 <MudNavLink Href="licenses/new" Icon="@Icons.Material.Filled.AddCircleOutline">Generar licencia</MudNavLink>
             </AuthorizeView>
             <AuthorizeView Policy="@AuthPolicies.IssueAccess">
+                <MudNavLink Href="licenses/bulk" Icon="@Icons.Material.Filled.LibraryAdd">Licencias masivas</MudNavLink>
+            </AuthorizeView>
+            <AuthorizeView Policy="@AuthPolicies.IssueAccess">
                 <MudNavLink Href="admin/products" Icon="@Icons.Material.Filled.Inventory2">Productos</MudNavLink>
+            </AuthorizeView>
+            <AuthorizeView Policy="@AuthPolicies.IssueAccess">
+                <MudNavLink Href="admin/docs" Icon="@Icons.Material.Filled.Description">Documentación</MudNavLink>
             </AuthorizeView>
             <AuthorizeView Policy="@AuthPolicies.AdminUserAccess">
                 <MudNavLink Href="admin/users" Icon="@Icons.Material.Filled.ManageAccounts">Usuarios admin</MudNavLink>

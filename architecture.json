@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Licensing System v2.0 Architecture",
+    "quality_profile": "showcase"
+  },
+  "components": [
+    {"id": "admin", "type": "backend", "label": "Admin"},
+    {"id": "api", "type": "backend", "label": "API"},
+    {"id": "db", "type": "database", "label": "PostgreSQL"},
+    {"id": "client", "type": "external", "label": "Client"},
+    {"id": "mail", "type": "external", "label": "SMTP"}
+  ],
+  "connections": [
+    {"from": "admin", "to": "db", "label": "EF Core"},
+    {"from": "api", "to": "db", "label": "EF Core"},
+    {"from": "client", "to": "api", "label": "Activation"},
+    {"from": "admin", "to": "mail", "label": "SMTP"}
+  ]
+}

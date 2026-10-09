@@ -1,1 +1,2 @@
 - [Licensing V2 Evolution](memory/project-licensing-v2.md) — project
+- [V2 Hardening Residual Issues](memory/v2-hardening-residual-issues.md) — project

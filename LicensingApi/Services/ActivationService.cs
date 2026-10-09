@@ -48,6 +48,10 @@ public partial class ActivationService
         if (license.Status == LicenseStatus.Expired)
             return ApiResult.Fail(ResultCode.LicenseExpired, "This license has expired.");
 
+        // Test licenses bypass all activation guards: no max-activation check, no
+        // PendingReview, no subscription expiry — the activation is always Approved.
+        var isTest = license.Status == LicenseStatus.Test;
+
         var match = _hwMatch.FindMatchingActivation(license.Activations, req.Hardware);
 
         Activation activation;
@@ -99,10 +103,13 @@ public partial class ActivationService
             }
             else
             {
-                var approvedCount = license.Activations.Count(a => a.Status == ActivationStatus.Approved);
-                if (approvedCount >= license.MaxActivations)
-                    return ApiResult.Fail(ResultCode.MaxActivationsReached,
-                        $"Maximum number of active installations ({license.MaxActivations}) reached for this license.");
+                if (!isTest)
+                {
+                    var approvedCount = license.Activations.Count(a => a.Status == ActivationStatus.Approved);
+                    if (approvedCount >= license.MaxActivations)
+                        return ApiResult.Fail(ResultCode.MaxActivationsReached,
+                            $"Maximum number of active installations ({license.MaxActivations}) reached for this license.");
+                }
 
                 activation = new Activation
                 {
@@ -113,9 +120,9 @@ public partial class ActivationService
                     MotherboardSerial = req.Hardware.MotherboardSerial,
                     TpmId = req.Hardware.TpmId,
                     MacAddressPrimary = req.Hardware.MacAddressPrimary,
-                    Status = ActivationStatus.PendingReview,
+                    Status = isTest ? ActivationStatus.Approved : ActivationStatus.PendingReview,
                     FirstActivatedAtUtc = DateTime.UtcNow,
-                    ReviewDeadlineUtc = DateTime.UtcNow.AddDays(ReviewGraceDays),
+                    ReviewDeadlineUtc = isTest ? null : DateTime.UtcNow.AddDays(ReviewGraceDays),
                 };
                 ApplyEnvironmentInfo(activation, req.Hardware, req.Vm);
 
@@ -185,8 +192,8 @@ public partial class ActivationService
             return BuildResult(activation, license, ResultCode.PendingReview, "pending_review");
         }
 
-        // Subscription expiry / grace handling.
-        if (license.SubscriptionExpiryUtc is { } expiry)
+        // Test licenses bypass subscription expiry checks.
+        if (license.Status != LicenseStatus.Test && license.SubscriptionExpiryUtc is { } expiry)
         {
             var graceEnd = expiry.AddDays(SubscriptionGraceDays);
             if (DateTime.UtcNow > graceEnd)

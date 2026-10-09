@@ -10,6 +10,7 @@ public class BulkLicenseService(LicenseIssuanceService issuanceService)
         Guid productId,
         Guid versionId,
         int quantity,
+        LicenseStatus status,
         string issuedBy,
         IProgress<double> progress,
         CancellationToken ct)
@@ -29,6 +30,7 @@ public class BulkLicenseService(LicenseIssuanceService issuanceService)
                 VersionId = versionId,
                 Model = LicenseModel.Machine, // Modelo por defecto
                 MaxActivations = 5,
+                Status = status,
                 IssuedBy = issuedBy
             };
 

@@ -4,6 +4,14 @@ using System.Text.Json.Serialization;
 
 namespace Miautrix.Licensing.Client;
 
+public enum LicenseStatus
+{
+    Active = 0,
+    Revoked = 1,
+    Expired = 2,
+    Test = 3,
+}
+
 public class HardwareInfo
 {
     public required string CpuId { get; set; }
@@ -23,6 +31,20 @@ public class ActivateRequest
     public required HardwareInfo Hardware { get; set; }
     public string? AppVersion { get; set; }
     public DateTime ClientTimestampUtc { get; set; }
+
+    /// <summary>
+    /// Product version this install is activating. Optional and retrocompatible: omit it
+    /// (or send <see cref="Guid.Empty"/>) and the server treats the license as the single
+    /// default version, which is what every pre-v2.0 client already does. The server
+    /// compares what you send against the version id stored on the license and fails with
+    /// <see cref="ResultCode.InvalidKeyFormat"/> on a mismatch.
+    /// </summary>
+    public Guid? VersionId { get; set; }
+
+    /// <summary>
+    /// Optional license status for test scenarios (e.g. <see cref="LicenseStatus.Test"/>).
+    /// </summary>
+    public LicenseStatus? Status { get; set; }
 }
 
 public class CheckinRequest

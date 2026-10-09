@@ -1,0 +1,20 @@
+@page "/admin/docs"
+@using LicensingAdmin.Auth
+@attribute [Authorize(Policy = AuthPolicies.IssueAccess)]
+
+<MudText Typo="Typo.h4" Class="mb-1">Documentación para desarrolladores</MudText>
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+    Descargas y referencias para integrar la DLL de activación y probar claves.
+</MudText>
+
+<MudPaper Class="pa-4" Elevation="1" MaxWidth="720px">
+    <MudText Typo="Typo.subtitle1" Class="mb-2">Documentación</MudText>
+    <MudList T="string" Dense="true">
+        <MudListItem Href="/downloads/MiautrixLicensingClient.zip" Icon="@Icons.Material.Filled.Download">
+            Descargar Cliente de Activación (DLL)
+        </MudListItem>
+        <MudListItem Href="/docs/activation-dll-integration-reference.md" Icon="@Icons.Material.Filled.Description">
+            Referencia de integración DLL/API
+        </MudListItem>
+    </MudList>
+</MudPaper>

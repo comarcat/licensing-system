@@ -1,6 +1,9 @@
 using LicensingAdmin.Notifications;
+using LicensingCore.Data;
 using LicensingCore.Entities;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace LicensingSystem.Tests;
@@ -48,8 +51,21 @@ public class NotificationConfigServiceTests
         }
     }
 
+    private sealed class FakeDbFactory : IDbContextFactory<AppDbContext>
+    {
+        public AppDbContext CreateDbContext() => throw new NotImplementedException();
+        public AppDbContext CreateDbContext(DbContextOptions<AppDbContext> options) => throw new NotImplementedException();
+        public Task<AppDbContext> CreateDbContextAsync(CancellationToken ct = default)
+        {
+            var options = new DbContextOptionsBuilder<AppDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+            return Task.FromResult(new AppDbContext(options));
+        }
+    }
+
     private static NotificationConfigService NewService(FakeStore store, RecordingSender sender) =>
-        new(store, new EphemeralDataProtectionProvider(), sender);
+        new(store, new EphemeralDataProtectionProvider(), sender, NullLogger<NotificationConfigService>.Instance, new FakeDbFactory());
 
     [Fact]
     public async Task SaveAsync_inserts_a_new_row_with_an_encrypted_password()
@@ -123,9 +139,10 @@ public class NotificationConfigServiceTests
         await svc.SaveAsync("smtp.example.com", 587, SmtpEncryption.StartTls, SmtpAuthType.Basic,
             "user@example.com", "super-secret", "noreply@example.com", Ct);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
             () => svc.SendTestEmailAsync("dest@example.com", Ct));
 
+        Assert.StartsWith("Error de conexión SMTP:", ex.Message);
         Assert.Equal(NotificationTestStatus.Failed, store.Row!.LastTestStatus);
         Assert.NotNull(store.Row.LastTestAtUtc);
     }
