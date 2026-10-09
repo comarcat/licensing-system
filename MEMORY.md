@@ -1,2 +1,5 @@
 - [Licensing V2 Evolution](memory/project-licensing-v2.md) — project
 - [V2 Hardening Residual Issues](memory/v2-hardening-residual-issues.md) — project
+- [Closing Step Skill](memory/closing-step.md) — project
+- [Feedback: Prioritize /graphify](feedback-prioritize-graphify.md) — feedback
+- [Target Framework Mismatch](target-framework-mismatch.md) — verify .NET 10 LTS target; build currently emits net8.0

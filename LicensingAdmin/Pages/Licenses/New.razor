@@ -185,7 +185,7 @@ else
     protected override async Task OnInitializedAsync()
     {
         await using var db = await DbFactory.CreateDbContextAsync();
-        _products = await db.SoftwareProducts.OrderBy(p => p.Name).ToListAsync();
+        _products = await db.SoftwareProducts.Where(p => !p.IsArchived).OrderBy(p => p.Name).ToListAsync();
         _loading = false;
     }
 
@@ -345,6 +345,6 @@ else
         _expiry = null;
         _customerEmail = _customerName = null;
         await using var db = await DbFactory.CreateDbContextAsync();
-        _products = await db.SoftwareProducts.OrderBy(p => p.Name).ToListAsync();
+        _products = await db.SoftwareProducts.Where(p => !p.IsArchived).OrderBy(p => p.Name).ToListAsync();
     }
 }

@@ -22,7 +22,13 @@ public class ProductVersionServiceTests
         public Task<SoftwareProduct?> FindByIdAsync(Guid id, CancellationToken ct = default) =>
             Task.FromResult(Products.FirstOrDefault(p => p.Id == id));
 
-        public Task AddAsync(SoftwareProduct product, AuditLogEntry audit, CancellationToken ct = default)
+        public Task AddAsync(SoftwareProduct product, AuditLogEntry auditProduct, IReadOnlyList<ProductVersion> versions, IReadOnlyList<AuditLogEntry> auditVersions, CancellationToken ct = default)
+        {
+            Products.Add(product);
+            return Task.CompletedTask;
+        }
+
+        public Task AddAsync(SoftwareProduct product, AuditLogEntry auditProduct, ProductVersion version, AuditLogEntry auditVersion, CancellationToken ct = default)
         {
             Products.Add(product);
             return Task.CompletedTask;

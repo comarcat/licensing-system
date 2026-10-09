@@ -69,7 +69,8 @@
 
 @code {
     [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
-    [Parameter] public SoftwareProduct Product { get; set; } = default!;
+    [Parameter] public SoftwareProduct? Product { get; set; }
+    [Parameter] public bool IsCreate { get; set; }
     [Inject] private ProductService ProductSvc { get; set; } = default!;
     [Inject] private AuthenticationStateProvider AuthState { get; set; } = default!;
     [Inject] private ISnackbar Snackbar { get; set; } = default!;
@@ -84,41 +85,66 @@
 
     protected override async Task OnInitializedAsync()
     {
-        _name = Product.Name;
-        _vendor = Product.Vendor;
-        _version = Product.CurrentVersion;
-        _flags = Product.DefaultLicenseModel;
-        _maxActivations = Product.DefaultMaxActivations;
-        await LoadVersionsAsync();
+        if (Product is not null)
+        {
+            _name = Product.Name;
+            _vendor = Product.Vendor;
+            _version = Product.CurrentVersion;
+            _flags = Product.DefaultLicenseModel;
+            _maxActivations = Product.DefaultMaxActivations;
+            if (!IsCreate) await LoadVersionsAsync();
+        }
+        else
+        {
+            Product = new SoftwareProduct { Id = Guid.Empty, Name = "", Vendor = "" };
+            _flags = LicenseModel.Machine;
+            _maxActivations = 5;
+        }
     }
 
-    private async Task LoadVersionsAsync() => _versions = (await ProductSvc.ListVersionsAsync(Product.Id)).ToList();
+    private async Task LoadVersionsAsync() => _versions = (await ProductSvc.ListVersionsAsync(Product!.Id)).ToList();
 
     private async Task AddVersionAsync()
     {
         if (string.IsNullOrWhiteSpace(_newVersionName)) return;
-        var actor = await GetActorAsync();
-        if (actor is null) return;
-        await ProductSvc.CreateVersionAsync(Product.Id, _newVersionName, actor);
+        if (IsCreate)
+        {
+            if (_versions.Any(v => v.Name == _newVersionName)) return;
+            _versions.Add(new ProductVersion { Id = Guid.NewGuid(), Name = _newVersionName.Trim() });
+        }
+        else
+        {
+            var actor = await GetActorAsync();
+            if (actor is null) return;
+            await ProductSvc.CreateVersionAsync(Product!.Id, _newVersionName, actor);
+            await LoadVersionsAsync();
+        }
         _newVersionName = null;
-        await LoadVersionsAsync();
-        Snackbar.Add("Versión creada.", Severity.Success);
+        Snackbar.Add("Versión preparada.", Severity.Success);
     }
 
     private async Task DeleteVersionAsync(ProductVersion version)
     {
-        var actor = await GetActorAsync();
-        if (actor is null) return;
-        try
+        if (IsCreate)
         {
-            await ProductSvc.DeleteVersionAsync(version.Id, actor);
-            await LoadVersionsAsync();
-            Snackbar.Add("Versión eliminada.", Severity.Success);
+            _versions.Remove(version);
         }
-        catch (ProductInUseException)
+        else
         {
-            Snackbar.Add("No se puede eliminar: licencias la usan.", Severity.Error);
+            var actor = await GetActorAsync();
+            if (actor is null) return;
+            try
+            {
+                await ProductSvc.DeleteVersionAsync(version.Id, actor);
+                await LoadVersionsAsync();
+            }
+            catch (ProductInUseException)
+            {
+                Snackbar.Add("No se puede eliminar: licencias la usan.", Severity.Error);
+                return;
+            }
         }
+        Snackbar.Add("Versión eliminada.", Severity.Success);
     }
 
     private async Task<string?> GetActorAsync()
@@ -134,15 +160,18 @@
     {
         var edited = new SoftwareProduct
         {
-            Id = Product.Id,
-            Name = _name,
-            Vendor = _vendor,
+            Id = Product!.Id,
+            Name = _name ?? "",
+            Vendor = _vendor ?? "",
             CurrentVersion = _version,
             DefaultLicenseModel = _flags,
             DefaultMaxActivations = _maxActivations,
         };
-        MudDialog.Close(DialogResult.Ok(edited));
+        var result = new ProductEditResult(edited, _versions.Select(v => v.Name).ToList());
+        MudDialog.Close(DialogResult.Ok(result));
     }
+
+    public record ProductEditResult(SoftwareProduct Product, List<string> VersionNames);
 
     private void Cancel() => MudDialog.Cancel();
 }

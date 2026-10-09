@@ -75,7 +75,7 @@ public sealed class LicenseExportService(IDbContextFactory<AppDbContext> factory
         var activationsSheet = workbook.Worksheets.Add("Activations");
         string[] activationHeaders =
         [
-            "License Key", "Product", "Customer Name", "Customer Email", "Install GUID",
+            "License Key", "Product", "Version", "Customer Name", "Customer Email", "Install GUID",
             "CPU ID", "Motherboard Serial", "TPM ID", "MAC Address", "OS Type", "OS Version",
             "CPU Model", "RAM (GB)", "Is VM", "VM Signals", "Status", "First Activated (UTC)",
             "Last Check-in (UTC)", "Review Deadline (UTC)", "Approved (UTC)", "Rejected (UTC)",
@@ -93,27 +93,28 @@ public sealed class LicenseExportService(IDbContextFactory<AppDbContext> factory
             {
                 activationsSheet.Cell(row, 1).Value = l.LicenseKey;
                 activationsSheet.Cell(row, 2).Value = l.Product.Name;
-                activationsSheet.Cell(row, 3).Value = l.CustomerName ?? "";
-                activationsSheet.Cell(row, 4).Value = l.CustomerEmail ?? "";
-                activationsSheet.Cell(row, 5).Value = a.InstallGuid.ToString();
-                activationsSheet.Cell(row, 6).Value = a.CpuId;
-                activationsSheet.Cell(row, 7).Value = a.MotherboardSerial;
-                activationsSheet.Cell(row, 8).Value = a.TpmId;
-                activationsSheet.Cell(row, 9).Value = a.MacAddressPrimary;
-                activationsSheet.Cell(row, 10).Value = a.OsType ?? "";
-                activationsSheet.Cell(row, 11).Value = a.OsVersion ?? "";
-                activationsSheet.Cell(row, 12).Value = a.CpuModel ?? "";
-                activationsSheet.Cell(row, 13).Value = a.RamGb;
-                activationsSheet.Cell(row, 14).Value = a.IsVm;
-                activationsSheet.Cell(row, 15).Value = a.VmSignals ?? "";
-                activationsSheet.Cell(row, 16).Value = a.Status.ToString();
-                activationsSheet.Cell(row, 17).Value = a.FirstActivatedAtUtc.ToString("yyyy-MM-dd HH:mm");
-                activationsSheet.Cell(row, 18).Value = a.LastCheckinAtUtc?.ToString("yyyy-MM-dd HH:mm") ?? "";
-                activationsSheet.Cell(row, 19).Value = a.ReviewDeadlineUtc?.ToString("yyyy-MM-dd HH:mm") ?? "";
-                activationsSheet.Cell(row, 20).Value = a.ApprovedAtUtc?.ToString("yyyy-MM-dd HH:mm") ?? "";
-                activationsSheet.Cell(row, 21).Value = a.RejectedAtUtc?.ToString("yyyy-MM-dd HH:mm") ?? "";
-                activationsSheet.Cell(row, 22).Value = a.ReviewedBy ?? "";
-                activationsSheet.Cell(row, 23).Value = a.ReviewNotes ?? "";
+                activationsSheet.Cell(row, 3).Value = l.Version.Name;
+                activationsSheet.Cell(row, 4).Value = l.CustomerName ?? "";
+                activationsSheet.Cell(row, 5).Value = l.CustomerEmail ?? "";
+                activationsSheet.Cell(row, 6).Value = a.InstallGuid.ToString();
+                activationsSheet.Cell(row, 7).Value = a.CpuId;
+                activationsSheet.Cell(row, 8).Value = a.MotherboardSerial;
+                activationsSheet.Cell(row, 9).Value = a.TpmId;
+                activationsSheet.Cell(row, 10).Value = a.MacAddressPrimary;
+                activationsSheet.Cell(row, 11).Value = a.OsType ?? "";
+                activationsSheet.Cell(row, 12).Value = a.OsVersion ?? "";
+                activationsSheet.Cell(row, 13).Value = a.CpuModel ?? "";
+                activationsSheet.Cell(row, 14).Value = a.RamGb;
+                activationsSheet.Cell(row, 15).Value = a.IsVm;
+                activationsSheet.Cell(row, 16).Value = a.VmSignals ?? "";
+                activationsSheet.Cell(row, 17).Value = a.Status.ToString();
+                activationsSheet.Cell(row, 18).Value = a.FirstActivatedAtUtc.ToString("yyyy-MM-dd HH:mm");
+                activationsSheet.Cell(row, 19).Value = a.LastCheckinAtUtc?.ToString("yyyy-MM-dd HH:mm") ?? "";
+                activationsSheet.Cell(row, 20).Value = a.ReviewDeadlineUtc?.ToString("yyyy-MM-dd HH:mm") ?? "";
+                activationsSheet.Cell(row, 21).Value = a.ApprovedAtUtc?.ToString("yyyy-MM-dd HH:mm") ?? "";
+                activationsSheet.Cell(row, 22).Value = a.RejectedAtUtc?.ToString("yyyy-MM-dd HH:mm") ?? "";
+                activationsSheet.Cell(row, 23).Value = a.ReviewedBy ?? "";
+                activationsSheet.Cell(row, 24).Value = a.ReviewNotes ?? "";
                 row++;
             }
         }

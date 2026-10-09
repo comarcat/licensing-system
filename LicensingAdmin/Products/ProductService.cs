@@ -21,7 +21,7 @@ public sealed class ProductService(IProductStore store)
     /// <exception cref="ArgumentException"><paramref name="name"/>, <paramref name="vendor"/> or <paramref name="actor"/> is null/blank.</exception>
     public async Task<SoftwareProduct> CreateAsync(
         string name, string vendor, string? currentVersion, LicenseModel defaultLicenseModel,
-        int defaultMaxActivations, string actor, CancellationToken ct = default)
+        int defaultMaxActivations, IReadOnlyList<string> versionNames, string actor, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentException.ThrowIfNullOrWhiteSpace(vendor);
@@ -44,17 +44,39 @@ public sealed class ProductService(IProductStore store)
         var audit = Audit(actor, product.Id, "Created");
         audit.DetailsJson = JsonSerializer.Serialize(new { name = product.Name });
 
-        // Auto-create default version
-        var defaultVersion = new ProductVersion
-        {
-            Id = Guid.NewGuid(),
-            ProductId = product.Id,
-            Name = "Default"
-        };
-        var versionAudit = Audit(actor, defaultVersion.Id, "Created", "ProductVersion");
+        var versions = versionNames
+            .Select(vn => vn.Trim())
+            .Where(vn => !string.IsNullOrWhiteSpace(vn))
+            .DistinctBy(vn => vn.ToLowerInvariant())
+            .Select(vn => new ProductVersion
+            {
+                Id = Guid.NewGuid(),
+                ProductId = product.Id,
+                Name = vn,
+            })
+            .ToList();
 
-        await store.AddAsync(product, audit, defaultVersion, versionAudit, ct);
+        if (versions.Count == 0)
+        {
+            versions.Add(new ProductVersion
+            {
+                Id = Guid.NewGuid(),
+                ProductId = product.Id,
+                Name = string.IsNullOrWhiteSpace(currentVersion) ? "Default" : currentVersion.Trim()
+            });
+        }
+
+        var versionAudits = versions.Select(v => Audit(actor, v.Id, "Created", "ProductVersion")).ToList();
+
+        await store.AddAsync(product, audit, versions, versionAudits, ct);
         return product;
+    }
+
+    public async Task<SoftwareProduct> CreateAsync(
+        string name, string vendor, string? currentVersion, LicenseModel defaultLicenseModel,
+        int defaultMaxActivations, string actor, CancellationToken ct = default)
+    {
+        return await CreateAsync(name, vendor, currentVersion, defaultLicenseModel, defaultMaxActivations, new List<string>(), actor, ct);
     }
 
     /// <exception cref="ArgumentException"><paramref name="name"/>, <paramref name="vendor"/> or <paramref name="actor"/> is null/blank.</exception>

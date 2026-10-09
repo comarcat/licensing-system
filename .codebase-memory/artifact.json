@@ -1,0 +1,11 @@
+{
+    "schema_version": 2,
+    "commit": "80a5b8f0c5a3c0f7c0fab6569105596260e2bef5",
+    "indexed_at": "2026-10-09T15:08:33Z",
+    "project": "LICENSE-SYSTEM",
+    "nodes": 2450,
+    "edges": 10303,
+    "original_size": 8323072,
+    "compressed_size": 1632694,
+    "compression_level": 9
+}

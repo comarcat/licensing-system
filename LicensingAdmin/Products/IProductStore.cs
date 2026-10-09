@@ -16,6 +16,8 @@ public interface IProductStore
 
     Task<SoftwareProduct?> FindByIdAsync(Guid id, CancellationToken ct = default);
 
+    Task AddAsync(SoftwareProduct product, AuditLogEntry auditProduct, IReadOnlyList<ProductVersion> versions, IReadOnlyList<AuditLogEntry> auditVersions, CancellationToken ct = default);
+
     Task AddAsync(SoftwareProduct product, AuditLogEntry auditProduct, ProductVersion version, AuditLogEntry auditVersion, CancellationToken ct = default);
 
     Task UpdateAsync(SoftwareProduct product, AuditLogEntry audit, CancellationToken ct = default);
@@ -58,14 +60,19 @@ public sealed class EfProductStore(IDbContextFactory<AppDbContext> factory) : IP
         return await db.SoftwareProducts.FirstOrDefaultAsync(p => p.Id == id, ct);
     }
 
-    public async Task AddAsync(SoftwareProduct product, AuditLogEntry auditProduct, ProductVersion version, AuditLogEntry auditVersion, CancellationToken ct = default)
+    public async Task AddAsync(SoftwareProduct product, AuditLogEntry auditProduct, IReadOnlyList<ProductVersion> versions, IReadOnlyList<AuditLogEntry> auditVersions, CancellationToken ct = default)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
         db.SoftwareProducts.Add(product);
         db.AuditLogEntries.Add(auditProduct);
-        db.ProductVersions.Add(version);
-        db.AuditLogEntries.Add(auditVersion);
+        db.ProductVersions.AddRange(versions);
+        db.AuditLogEntries.AddRange(auditVersions);
         await db.SaveChangesAsync(ct);
+    }
+
+    public async Task AddAsync(SoftwareProduct product, AuditLogEntry auditProduct, ProductVersion version, AuditLogEntry auditVersion, CancellationToken ct = default)
+    {
+        await AddAsync(product, auditProduct, new[] { version }, new[] { auditVersion }, ct);
     }
 
     public async Task UpdateAsync(SoftwareProduct product, AuditLogEntry audit, CancellationToken ct = default)

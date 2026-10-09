@@ -18,6 +18,7 @@ public class ProductServiceTests
         public readonly Dictionary<Guid, int> LicenseCounts = new();
         public (SoftwareProduct product, AuditLogEntry audit)? Added;
         public (SoftwareProduct product, AuditLogEntry audit)? Updated;
+        public (ProductVersion version, AuditLogEntry audit)? AddedVersion;
         public AuditLogEntry? DeletedAudit;
 
         public Task<IReadOnlyList<SoftwareProduct>> ListAsync(bool includeArchived = false, CancellationToken ct = default) =>
@@ -27,9 +28,18 @@ public class ProductServiceTests
         public Task<SoftwareProduct?> FindByIdAsync(Guid id, CancellationToken ct = default) =>
             Task.FromResult(Rows.FirstOrDefault(p => p.Id == id));
 
-        public Task AddAsync(SoftwareProduct product, AuditLogEntry audit, CancellationToken ct = default)
+        public Task AddAsync(SoftwareProduct product, AuditLogEntry auditProduct, IReadOnlyList<ProductVersion> versions, IReadOnlyList<AuditLogEntry> auditVersions, CancellationToken ct = default)
         {
-            Added = (product, audit);
+            Added = (product, auditProduct);
+            AddedVersion = (versions.First(), auditVersions.First());
+            Rows.Add(product);
+            return Task.CompletedTask;
+        }
+
+        public Task AddAsync(SoftwareProduct product, AuditLogEntry auditProduct, ProductVersion version, AuditLogEntry auditVersion, CancellationToken ct = default)
+        {
+            Added = (product, auditProduct);
+            AddedVersion = (version, auditVersion);
             Rows.Add(product);
             return Task.CompletedTask;
         }
@@ -101,6 +111,20 @@ public class ProductServiceTests
         Assert.Equal("Created", store.Added!.Value.audit.Action);
         Assert.Equal("SoftwareProduct", store.Added.Value.audit.EntityType);
         Assert.Equal("boss@vendor.test", store.Added.Value.audit.Actor);
+    }
+
+    [Fact]
+    public async Task CreateAsync_creates_default_version()
+    {
+        var store = new FakeStore();
+        var svc = new ProductService(store);
+
+        var product = await svc.CreateAsync(
+            "InvoicePro", "Acme", "1.0", LicenseModel.Machine, 5, "boss@vendor.test", Ct);
+
+        Assert.NotNull(store.AddedVersion);
+        Assert.Equal("1.0", store.AddedVersion!.Value.version.Name);
+        Assert.Equal(product.Id, store.AddedVersion.Value.version.ProductId);
     }
 
     [Fact]

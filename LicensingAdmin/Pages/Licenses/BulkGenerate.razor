@@ -51,7 +51,7 @@ else
 
     protected override async Task OnInitializedAsync() {
         using var db = await DbFactory.CreateDbContextAsync();
-        _products = await db.SoftwareProducts.ToListAsync();
+        _products = await db.SoftwareProducts.Where(p => !p.IsArchived).ToListAsync();
     }
 
     private async Task OnProductChanged(Guid productId) {
@@ -70,7 +70,9 @@ else
 
         var (fileContent, _) = await BulkService.GenerateAsync(_productId, _versionId, _quantity, _status, email, progress, CancellationToken.None);
 
-        await JS.InvokeVoidAsync("downloadFileFromStream", $"licencias-{DateTime.UtcNow:yyyyMMdd}.xlsx", Convert.ToBase64String(fileContent));
+        var productName = _products.FirstOrDefault(p => p.Id == _productId)?.Name ?? "producto";
+        var safeProductName = string.Join("-", productName.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries));
+        await JS.InvokeVoidAsync("downloadFileFromStream", $"licencias-{safeProductName}-{DateTime.UtcNow:yyyyMMdd}.xlsx", Convert.ToBase64String(fileContent));
         _isGenerating = false;
     }
 }

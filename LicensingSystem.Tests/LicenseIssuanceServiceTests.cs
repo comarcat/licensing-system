@@ -1,8 +1,12 @@
 using System.Security.Cryptography;
 using System.Text;
 using LicensingAdmin.Licensing;
+using LicensingAdmin.Notifications;
+using LicensingAdmin.Products;
 using LicensingCore.Crypto;
 using LicensingCore.Entities;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace LicensingSystem.Tests;
@@ -57,7 +61,14 @@ public class LicenseIssuanceServiceTests
         IssuedBy = issuedBy,
     };
 
-    private LicenseIssuanceService NewService(FakeLicenseStore store) => new(Signer(), store);
+    private static readonly IProductStore FakeProductStore = new NoopProductStore();
+    private static readonly IEmailSender FakeEmailSender = new NoopEmailSender();
+    private static readonly INotificationConfigStore FakeConfigStore = new NoopConfigStore();
+    private static readonly IDataProtectionProvider FakeDataProtection = new NoopDataProtectionProvider();
+    private static readonly ILogger<LicenseIssuanceService> Logger = new NoopLogger<LicenseIssuanceService>();
+
+    private LicenseIssuanceService NewService(FakeLicenseStore store) =>
+        new(Signer(), store, FakeProductStore, FakeEmailSender, FakeConfigStore, FakeDataProtection, Logger);
 
     // ---------------------------------------------------------------------
     // Acceptance criterion 1 — LicenseKey matches the canonical format.
@@ -455,6 +466,84 @@ public class LicenseIssuanceServiceTests
             return Task.CompletedTask;
         }
 
+        public Task AddAsync(SoftwareProduct product, AuditLogEntry auditProduct, IReadOnlyList<ProductVersion> versions, IReadOnlyList<AuditLogEntry> auditVersions, CancellationToken ct = default)
+        {
+            return AddAsync(product, versions.FirstOrDefault(), new License { LicenseKey = "", Signature = Array.Empty<byte>() }, auditProduct, ct);
+        }
+
         public ProductVersion? AddedVersion { get; private set; }
+    }
+
+    private sealed class NoopProductStore : IProductStore
+    {
+        public Task<IReadOnlyList<SoftwareProduct>> ListAsync(bool includeArchived = false, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<SoftwareProduct>>(Array.Empty<SoftwareProduct>());
+
+        public Task<SoftwareProduct?> FindByIdAsync(Guid id, CancellationToken ct = default) =>
+            Task.FromResult<SoftwareProduct?>(null);
+
+        public Task AddAsync(SoftwareProduct product, AuditLogEntry auditProduct, IReadOnlyList<ProductVersion> versions, IReadOnlyList<AuditLogEntry> auditVersions, CancellationToken ct = default) =>
+            Task.CompletedTask;
+
+        public Task AddAsync(SoftwareProduct product, AuditLogEntry auditProduct, ProductVersion version, AuditLogEntry auditVersion, CancellationToken ct = default) =>
+            Task.CompletedTask;
+
+        public Task UpdateAsync(SoftwareProduct product, AuditLogEntry audit, CancellationToken ct = default) =>
+            Task.CompletedTask;
+
+        public Task<int> CountLicensesAsync(Guid productId, CancellationToken ct = default) =>
+            Task.FromResult(0);
+
+        public Task ArchiveAsync(Guid productId, AuditLogEntry audit, CancellationToken ct = default) =>
+            Task.CompletedTask;
+
+        public Task DeleteAsync(Guid productId, AuditLogEntry audit, CancellationToken ct = default) =>
+            Task.CompletedTask;
+
+        public Task<IReadOnlyList<ProductVersion>> ListVersionsAsync(Guid productId, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<ProductVersion>>(Array.Empty<ProductVersion>());
+
+        public Task AddVersionAsync(ProductVersion version, AuditLogEntry audit, CancellationToken ct = default) =>
+            Task.CompletedTask;
+
+        public Task UpdateVersionAsync(ProductVersion version, AuditLogEntry audit, CancellationToken ct = default) =>
+            Task.CompletedTask;
+
+        public Task DeleteVersionAsync(Guid versionId, AuditLogEntry audit, CancellationToken ct = default) =>
+            Task.CompletedTask;
+    }
+
+    private sealed class NoopEmailSender : IEmailSender
+    {
+        public Task SendAsync(NotificationConfig config, string? plainPassword, string toAddress, string subject, string body, CancellationToken ct = default) =>
+            Task.CompletedTask;
+    }
+
+    private sealed class NoopConfigStore : INotificationConfigStore
+    {
+        public Task<NotificationConfig?> GetAsync(CancellationToken ct = default) =>
+            Task.FromResult<NotificationConfig?>(null);
+
+        public Task SaveAsync(NotificationConfig config, CancellationToken ct = default) =>
+            Task.CompletedTask;
+    }
+
+    private sealed class NoopDataProtectionProvider : IDataProtectionProvider
+    {
+        public IDataProtector CreateProtector(string purpose) => new NoopDataProtector();
+    }
+
+    private sealed class NoopDataProtector : IDataProtector
+    {
+        public IDataProtector CreateProtector(string purpose) => this;
+        public byte[] Protect(byte[] plaintext) => plaintext;
+        public byte[] Unprotect(byte[] protectedData) => protectedData;
+    }
+
+    private sealed class NoopLogger<T> : ILogger<T>
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => false;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) { }
     }
 }

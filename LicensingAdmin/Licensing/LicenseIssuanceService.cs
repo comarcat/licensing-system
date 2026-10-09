@@ -1,4 +1,5 @@
 using LicensingAdmin.Notifications;
+using LicensingAdmin.Products;
 using LicensingCore.Crypto;
 using LicensingCore.Entities;
 using LicensingCore.Licensing;
@@ -16,6 +17,7 @@ namespace LicensingAdmin.Licensing;
 public sealed class LicenseIssuanceService(
     ILicenseSigner signer,
     ILicenseStore store,
+    IProductStore productStore,
     IEmailSender emailSender,
     INotificationConfigStore configStore,
     IDataProtectionProvider dataProtection,
@@ -142,20 +144,20 @@ public sealed class LicenseIssuanceService(
         await store.AddAsync(newProduct, newVersion, license, audit, ct);
 
         // 6. Hand the caller the signed, persisted license.
-        if (!string.IsNullOrWhiteSpace(license.CustomerEmail))
+        if (!string.IsNullOrWhiteSpace(license.CustomerEmail) && await configStore.GetAsync(ct) is { } config)
         {
-            await SafelySendNotificationAsync(license, ct);
+            var product = newProduct ?? await productStore.FindByIdAsync(productId, ct) ?? throw new Exception("Product missing");
+            var version = newVersion ?? (await productStore.ListVersionsAsync(productId, ct)).First(v => v.Id == versionId);
+            await SafelySendNotificationAsync(config, license, product, version, ct);
         }
 
         return license;
     }
 
-    private async Task SafelySendNotificationAsync(License license, CancellationToken ct)
+    private async Task SafelySendNotificationAsync(NotificationConfig config, License license, SoftwareProduct product, ProductVersion version, CancellationToken ct)
     {
         try
         {
-            var config = await configStore.GetAsync(ct);
-            if (config is null) return;
             string? password = config.PasswordEncrypted.Length > 0
                 ? System.Text.Encoding.UTF8.GetString(Protector.Unprotect(config.PasswordEncrypted))
                 : null;
@@ -163,7 +165,7 @@ public sealed class LicenseIssuanceService(
             await emailSender.SendAsync(
                 config, password, license.CustomerEmail!,
                 "Licencia emitida — Miautrix Licensing System",
-                $"Se ha emitido una nueva licencia:\n\nClave: {license.LicenseKey}\nProducto: {license.ProductId}\n\nGracias.",
+                $"Se ha emitido una nueva licencia:\n\nClave: {license.LicenseKey}\nProducto: {product.Name} (Versión: {version.Name})\n\nGracias.",
                 ct);
             logger.LogInformation("Issuance notification sent to {Email}.", license.CustomerEmail);
         }
