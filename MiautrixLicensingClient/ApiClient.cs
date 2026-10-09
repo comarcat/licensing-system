@@ -24,26 +24,37 @@ public class HardwareInfo
     public int? RamGb { get; set; }
 }
 
+public class VmInfo
+{
+    public bool HypervisorPresent { get; set; }
+    public List<string> Signals { get; set; } = new();
+}
+
 public class ActivateRequest
 {
     public required string LicenseKey { get; set; }
     public required Guid InstallGuid { get; set; }
     public required HardwareInfo Hardware { get; set; }
+    public VmInfo? Vm { get; set; }
     public string? AppVersion { get; set; }
+
+    /// <summary>
+    /// Optional customer email to store on the license record during activation.
+    /// </summary>
     public string? Email { get; set; }
+
     public DateTime ClientTimestampUtc { get; set; }
 
     /// <summary>
     /// Product version this install is activating. Optional and retrocompatible: omit it
-    /// (or send <see cref="Guid.Empty"/>) and the server treats the license as the single
-    /// default version, which is what every pre-v2.0 client already does. The server
-    /// compares what you send against the version id stored on the license and fails with
-    /// <see cref="ResultCode.InvalidKeyFormat"/> on a mismatch.
+    /// (or send <see cref="Guid.Empty"/>) when the integration does not pin a product
+    /// version. If supplied and it differs from the version stored on the license, the
+    /// server rejects activation with <see cref="ResultCode.InvalidKeyFormat"/>.
     /// </summary>
     public Guid? VersionId { get; set; }
 
     /// <summary>
-    /// Optional license status for test scenarios (e.g. <see cref="LicenseStatus.Test"/>).
+    /// Optional status override for controlled test scenarios.
     /// </summary>
     public LicenseStatus? Status { get; set; }
 }
@@ -53,6 +64,8 @@ public class CheckinRequest
     public required Guid ActivationId { get; set; }
     public required Guid InstallGuid { get; set; }
     public required HardwareInfo Hardware { get; set; }
+    public VmInfo? Vm { get; set; }
+    public string? LastLocalStatus { get; set; }
     public DateTime ClientTimestampUtc { get; set; }
 }
 
@@ -84,9 +97,8 @@ public class ApiResult
 }
 
 /// <summary>
-/// Mirrors LicensingApi.Dtos.ResultCode. The client should switch on this rather than
-/// parsing Message text, and treat any value it doesn't recognize as a failure — future
-/// server versions may add codes.
+/// Mirrors LicensingApi.Dtos.ResultCode. Switch on this value instead of parsing
+/// human-readable messages. Unknown future values should be treated as failures.
 /// </summary>
 public enum ResultCode
 {
@@ -96,17 +108,25 @@ public enum ResultCode
 }
 
 /// <summary>
-/// Thin HTTP client for LicensingApi's two activation endpoints. See
-/// activation-dll-integration-reference.md for the full contract (business rules,
-/// error codes, license-file decryption).
+/// Thin HTTP client for LicensingApi's activation endpoints.
+///
+/// Current activation behavior:
+/// - Existing/same hardware reuses the activation record.
+/// - New hardware auto-approves while approved activations are below MaxActivations.
+/// - New hardware beyond MaxActivations returns PendingReview.
+/// - Test licenses bypass activation limits.
 /// </summary>
 public sealed class ActivationApiClient : IDisposable
 {
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+    };
+
     private readonly HttpClient _http;
 
     /// <param name="baseUrl">
-    /// e.g. "https://licensing-api.miautrix.tech" (production) or
-    /// "http://10.11.1.41:8080" (LAN-direct).
+    /// Example: "https://licensing-api.miautrix.tech".
     /// </param>
     public ActivationApiClient(string baseUrl)
     {
@@ -128,11 +148,23 @@ public sealed class ActivationApiClient : IDisposable
     private static async Task<(int, ApiResult)> ReadResultAsync(HttpResponseMessage response, CancellationToken ct)
     {
         var body = await response.Content.ReadAsStringAsync(ct);
-        var result = JsonSerializer.Deserialize<ApiResult>(body, new JsonSerializerOptions
+        try
         {
-            PropertyNameCaseInsensitive = true,
-        }) ?? new ApiResult { Success = false, Code = ResultCode.ServerError, Message = "Empty/unparseable response." };
-        return ((int)response.StatusCode, result);
+            var result = JsonSerializer.Deserialize<ApiResult>(body, JsonOptions)
+                ?? new ApiResult { Success = false, Code = ResultCode.ServerError, Message = "Empty response." };
+            return ((int)response.StatusCode, result);
+        }
+        catch (JsonException)
+        {
+            return ((int)response.StatusCode, new ApiResult
+            {
+                Success = false,
+                Code = ResultCode.ServerError,
+                Message = string.IsNullOrWhiteSpace(body)
+                    ? "Empty/unparseable response."
+                    : body.Trim(),
+            });
+        }
     }
 
     public void Dispose() => _http.Dispose();

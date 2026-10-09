@@ -61,6 +61,7 @@ public class ActivateRequest
     public required HardwareInfo Hardware { get; set; }
     public VmInfo? Vm { get; set; }                          // optional
     public string? AppVersion { get; set; }                  // optional, informational
+    public string? Email { get; set; }                       // optional, updates License.CustomerEmail
     public DateTime ClientTimestampUtc { get; set; }
     public Guid? VersionId { get; set; }                     // optional, retrocompatible (v2.0+)
 }
@@ -168,16 +169,16 @@ public class PolicyDto
 | `LicenseExpired`         | 403 | License row's own `Status` is `Expired` |
 | `LicenseRevoked`         | 403 | License row's own `Status` is `Revoked` |
 | `InstallGuidMismatch`    | 403 | Checkin: `InstallGuid` doesn't match the activation record |
-| `MaxActivationsReached`  | 409 | New install rejected: `License.MaxActivations` already reached — no `Activation` row is created |
+| `MaxActivationsReached`  | 409 | Reserved legacy hard rejection; current flow creates `PendingReview` when approved activations are already at `License.MaxActivations` |
 | `RateLimited`            | 429 | Per-client-IP throttle tripped — see note below |
 | `ServerError`            | 500 | Unhandled exception; retry with backoff |
 
-**Note on `MaxActivationsReached`:** enforced as a hard rejection since 2026-09-13. A
-*new* install (no existing hardware match on this license) is rejected outright —
-`Data` is `null`, `Message` explains the limit — when the count of currently `Approved`
-activations already meets `License.MaxActivations`. This only gates brand-new
-installs; reactivating an existing approved/pending-review machine (same hardware) is
-never blocked by this check, since it isn't consuming a new slot.
+**Note on activation limits:** current behavior is review-based, not hard rejection.
+A new hardware fingerprint auto-approves while the count of currently `Approved`
+activations is below `License.MaxActivations`. Once the approved count reaches the
+limit, additional new hardware receives `PendingReview` and a signed license file with
+`pending_review` status. Reactivating an existing machine with the same hardware is
+not blocked because it does not consume a new slot.
 
 **Rate limiting:** since 2026-09-13, `/api/activate` and `/api/checkin` are throttled
 per client IP address — a fixed window of 30 requests/minute, no queueing (the 31st
@@ -298,12 +299,12 @@ this document and the public key above.
   and the server defaults to version 0 — every pre-v2.0 client is unaffected. The
   `VersionId` is validated against the database, not the request alone; developers should
   obtain the correct version id for their product from the admin panel.
-- **New install, no hardware match on record** → `PendingReview`. `ReviewDeadlineUtc` is
-  15 days out. The license file's `Status` will be `pending_review` in this window —
-  the client tool should decide its own local grace-period UX (e.g., run in a limited
-  mode) rather than blocking entirely, since a human has up to 15 days to approve it.
-- **Same hardware reactivating** → immediately re-approved (unless still pending) and
-  the check-in cadence continues normally.
+- **New install, no hardware match on record** → approved immediately while approved
+  activation count is below `License.MaxActivations`; otherwise returns `PendingReview`.
+  Pending review carries a `ReviewDeadlineUtc` 15 days out and a signed license file
+  whose `Status` is `pending_review`.
+- **Same hardware reactivating** → reuses the existing activation row and remains
+  approved when that row is already approved; it does not consume another activation slot.
 - **Hardware fingerprint changes** (new machine, or a component swap that changes one of
   the 4 fields) → the *same* `ActivationId` re-enters `PendingReview` with the new
   fingerprint — a `/checkin` is not guaranteed to return `Renewed`. Keep using the
@@ -359,26 +360,26 @@ Request:
     "ramGb": 32
   },
   "appVersion": "1.4.2",
+  "email": "customer@example.com",
   "clientTimestampUtc": "2026-09-13T12:00:00Z",
   "versionId": null
 }
 ```
 
-Response (`200 OK`, new install — **every** brand-new activation starts in
-`PendingReview`; the client only ever sees `Activated`/`approved` on a later
-reactivation of hardware that an admin already approved, never on the first call):
+Response (`200 OK`, new installation while approved activation count is below
+`MaxActivations`, therefore immediately approved):
 ```json
 {
   "success": true,
-  "code": "PendingReview",
+  "code": "Activated",
   "message": null,
   "data": {
     "activationId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-    "status": "pending_review",
+    "status": "approved",
     "licenseFileBase64": "…(base64-encoded signed XML, see §5)…",
     "policy": { "checkIntervalHours": 6, "graceDays": 15, "subscriptionGraceDays": 30 },
     "subscriptionExpiryUtc": null,
-    "reviewDeadlineUtc": "2026-09-28T12:00:00.0000000Z",
+    "reviewDeadlineUtc": null,
     "reason": null
   }
 }

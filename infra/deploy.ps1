@@ -45,6 +45,8 @@ Remove-Item -Recurse -Force "$PublishDir\client" -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path "$PublishDir\client" | Out-Null
 dotnet publish "$RepoRoot\MiautrixLicensingClient\MiautrixLicensingClient.csproj" `
     -c Release -o "$PublishDir\client\files"
+New-Item -ItemType Directory -Path "$PublishDir\client\files\docs" | Out-Null
+Copy-Item "$RepoRoot\docs\client-integration\MiautrixLicensingClient-Integration.*" "$PublishDir\client\files\docs\" -Force
 Compress-Archive -Path "$PublishDir\client\files\*" -DestinationPath "$PublishDir\client\MiautrixLicensingClient.zip"
 Remove-Item -Recurse -Force "$PublishDir\client\files"
 

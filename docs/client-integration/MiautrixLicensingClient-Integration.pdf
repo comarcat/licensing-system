@@ -1,0 +1,287 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>
+endobj
+2 0 obj
+<< /Length 2288 >>
+stream
+BT /F1 9 Tf 40 760 Td
+(MIAUTRIX LICENSING CLIENT INTEGRATION GUIDE) Tj
+0 -14 Td () Tj
+0 -14 Td (PURPOSE) Tj
+0 -14 Td () Tj
+0 -14 Td (MiautrixLicensingClient.dll is the .NET client library for activating and checking in) Tj
+0 -14 Td (licenses against the Miautrix Licensing API.) Tj
+0 -14 Td () Tj
+0 -14 Td (Live API base URL:) Tj
+0 -14 Td () Tj
+0 -14 Td (https://licensing-api.miautrix.tech) Tj
+0 -14 Td () Tj
+0 -14 Td (Endpoints used by the DLL:) Tj
+0 -14 Td () Tj
+0 -14 Td (POST /api/activate) Tj
+0 -14 Td (POST /api/checkin) Tj
+0 -14 Td (GET  /health) Tj
+0 -14 Td () Tj
+0 -14 Td (REQUIREMENTS) Tj
+0 -14 Td () Tj
+0 -14 Td (- .NET 10 runtime for apps targeting the current DLL build.) Tj
+0 -14 Td (- Windows for the built-in HardwareFingerprint implementation because it uses WMI and) Tj
+0 -14 Td (System.Management.) Tj
+0 -14 Td (- Internet access to https://licensing-api.miautrix.tech.) Tj
+0 -14 Td (- No private key, AES key, database connection string, or admin credential is required) Tj
+0 -14 Td (in the client.) Tj
+0 -14 Td () Tj
+0 -14 Td (FILES TO DISTRIBUTE) Tj
+0 -14 Td () Tj
+0 -14 Td (For a direct DLL integration, provide:) Tj
+0 -14 Td () Tj
+0 -14 Td (- MiautrixLicensingClient.dll) Tj
+0 -14 Td (- MiautrixLicensingClient.deps.json when publishing framework-dependent apps) Tj
+0 -14 Td (- Matching .pdb only if debug symbols are desired) Tj
+0 -14 Td () Tj
+0 -14 Td (Recommended path for integrators is to reference the project/package produced from) Tj
+0 -14 Td (MiautrixLicensingClient rather than copying source files.) Tj
+0 -14 Td () Tj
+0 -14 Td (BASIC ACTIVATION FLOW) Tj
+0 -14 Td () Tj
+0 -14 Td (1. Generate and persist one InstallGuid per installed app instance.) Tj
+0 -14 Td (2. Read hardware with HardwareFingerprint.Read\(\) or provide equivalent stable values.) Tj
+0 -14 Td (3. Call ActivationApiClient.ActivateAsync\(\).) Tj
+0 -14 Td (4. If the response contains LicenseFileBase64, verify it with) Tj
+0 -14 Td (LicenseFile.VerifyAndParse\(\).) Tj
+0 -14 Td (5. Persist the returned ActivationId, InstallGuid, and license file.) Tj
+0 -14 Td (6. Periodically call CheckinAsync\(\) using the returned policy interval.) Tj
+0 -14 Td () Tj
+0 -14 Td (ACTIVATION BEHAVIOR) Tj
+0 -14 Td () Tj
+0 -14 Td (- Same hardware reactivation reuses the existing activation row.) Tj
+ET
+endstream
+endobj
+3 0 obj
+<< /Type /Page /Parent 12 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 2 0 R >>
+endobj
+4 0 obj
+<< /Length 2367 >>
+stream
+BT /F1 9 Tf 40 760 Td
+(- New hardware auto-approves while approved activations are below) Tj
+0 -14 Td (License.MaxActivations.) Tj
+0 -14 Td (- New hardware over the approved activation limit returns PendingReview.) Tj
+0 -14 Td (- Test licenses bypass activation limits.) Tj
+0 -14 Td (- Revoked and expired licenses fail activation.) Tj
+0 -14 Td (- Optional activation email updates the license customer email server-side.) Tj
+0 -14 Td () Tj
+0 -14 Td (C# EXAMPLE) Tj
+0 -14 Td () Tj
+0 -14 Td (using System.Security.Cryptography;) Tj
+0 -14 Td (using Miautrix.Licensing.Client;) Tj
+0 -14 Td () Tj
+0 -14 Td (var baseUrl = "https://licensing-api.miautrix.tech";) Tj
+0 -14 Td (var licenseKey = "XXXX-XXXXX-XXXX-XXXX-XXXX-XXXX-XX";) Tj
+0 -14 Td (var installGuid = LoadOrCreateInstallGuid\(\);) Tj
+0 -14 Td (var hardware = HardwareFingerprint.Read\(\);) Tj
+0 -14 Td () Tj
+0 -14 Td (using var client = new ActivationApiClient\(baseUrl\);) Tj
+0 -14 Td (var \(httpStatus, result\) = await client.ActivateAsync\(new ActivateRequest) Tj
+0 -14 Td ({) Tj
+0 -14 Td (    LicenseKey = licenseKey,) Tj
+0 -14 Td (    InstallGuid = installGuid,) Tj
+0 -14 Td (    Hardware = hardware,) Tj
+0 -14 Td (    AppVersion = "1.0.0",) Tj
+0 -14 Td (    Email = "customer@example.com",) Tj
+0 -14 Td (    VersionId = null,) Tj
+0 -14 Td (    ClientTimestampUtc = DateTime.UtcNow,) Tj
+0 -14 Td (}\);) Tj
+0 -14 Td () Tj
+0 -14 Td (if \(!result.Success\)) Tj
+0 -14 Td ({) Tj
+0 -14 Td (    throw new InvalidOperationException\($"Activation failed: HTTP {httpStatus},) Tj
+0 -14 Td ({result.Code}, {result.Message}"\);) Tj
+0 -14 Td (}) Tj
+0 -14 Td () Tj
+0 -14 Td (if \(result.Data?.LicenseFileBase64 is not { Length: > 0 } licenseFileBase64\)) Tj
+0 -14 Td ({) Tj
+0 -14 Td (    throw new InvalidOperationException\("Activation did not return a license file."\);) Tj
+0 -14 Td (}) Tj
+0 -14 Td () Tj
+0 -14 Td (using var publicKey = RSA.Create\(\);) Tj
+0 -14 Td (publicKey.ImportFromPem\(Keys.LicensingPublicKeyPem\);) Tj
+0 -14 Td (var file = LicenseFile.VerifyAndParse\(licenseFileBase64, publicKey\);) Tj
+0 -14 Td () Tj
+0 -14 Td (if \(!file.SignatureVerified\)) Tj
+0 -14 Td ({) Tj
+0 -14 Td (    throw new InvalidOperationException\("License file signature verification failed."\);) Tj
+0 -14 Td (}) Tj
+0 -14 Td () Tj
+0 -14 Td (SaveActivationState\(result.Data.ActivationId, installGuid, licenseFileBase64\);) Tj
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 12 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 4 0 R >>
+endobj
+6 0 obj
+<< /Length 2117 >>
+stream
+BT /F1 9 Tf 40 760 Td
+() Tj
+0 -14 Td (CHECK-IN EXAMPLE) Tj
+0 -14 Td () Tj
+0 -14 Td (var \(httpStatus, result\) = await client.CheckinAsync\(new CheckinRequest) Tj
+0 -14 Td ({) Tj
+0 -14 Td (    ActivationId = savedActivationId,) Tj
+0 -14 Td (    InstallGuid = savedInstallGuid,) Tj
+0 -14 Td (    Hardware = HardwareFingerprint.Read\(\),) Tj
+0 -14 Td (    LastLocalStatus = savedStatus,) Tj
+0 -14 Td (    ClientTimestampUtc = DateTime.UtcNow,) Tj
+0 -14 Td (}\);) Tj
+0 -14 Td () Tj
+0 -14 Td (if \(result.Code == ResultCode.Locked\)) Tj
+0 -14 Td ({) Tj
+0 -14 Td (    // Stop trusting any cached license file.) Tj
+0 -14 Td (    DisableLicensedFeatures\(result.Data?.Reason\);) Tj
+0 -14 Td (}) Tj
+0 -14 Td (else if \(result.Success && result.Data?.LicenseFileBase64 is { Length: > 0 }) Tj
+0 -14 Td (refreshedFile\)) Tj
+0 -14 Td ({) Tj
+0 -14 Td (    // Verify before storing/trusting.) Tj
+0 -14 Td (    var parsed = LicenseFile.VerifyAndParse\(refreshedFile, publicKey\);) Tj
+0 -14 Td (    if \(parsed.SignatureVerified\)) Tj
+0 -14 Td (        SaveLicenseFile\(refreshedFile\);) Tj
+0 -14 Td (}) Tj
+0 -14 Td () Tj
+0 -14 Td (HARDWARE FINGERPRINT RULES) Tj
+0 -14 Td () Tj
+0 -14 Td (The API identifies a machine by exact match on these four fields:) Tj
+0 -14 Td () Tj
+0 -14 Td (- CpuId) Tj
+0 -14 Td (- MotherboardSerial) Tj
+0 -14 Td (- TpmId) Tj
+0 -14 Td (- MacAddressPrimary) Tj
+0 -14 Td () Tj
+0 -14 Td (If a value cannot be read, use a stable placeholder. Do not send random or changing) Tj
+0 -14 Td (values.) Tj
+0 -14 Td () Tj
+0 -14 Td (PRODUCT VERSIONS) Tj
+0 -14 Td () Tj
+0 -14 Td (ActivateRequest.VersionId is optional. If supplied, it must match the version stored on) Tj
+0 -14 Td (the license. If it does not match, the API returns InvalidKeyFormat.) Tj
+0 -14 Td () Tj
+0 -14 Td (EMAIL/CUSTOMER UPDATE) Tj
+0 -14 Td () Tj
+0 -14 Td (ActivateRequest.Email is optional. When provided, the API trims it and stores it on) Tj
+0 -14 Td (License.CustomerEmail. This is useful for associating a license with the activating) Tj
+0 -14 Td (customer during field activation.) Tj
+0 -14 Td () Tj
+0 -14 Td (LICENSE FILE VERIFICATION) Tj
+ET
+endstream
+endobj
+7 0 obj
+<< /Type /Page /Parent 12 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 6 0 R >>
+endobj
+8 0 obj
+<< /Length 2366 >>
+stream
+BT /F1 9 Tf 40 760 Td
+() Tj
+0 -14 Td (The returned LicenseFileBase64 is base64-encoded signed XML. It is not encrypted.) Tj
+0 -14 Td (Verification uses:) Tj
+0 -14 Td () Tj
+0 -14 Td (- RSA-SHA256) Tj
+0 -14 Td (- PKCS#1 v1.5 padding) Tj
+0 -14 Td (- Public key embedded in Keys.LicensingPublicKeyPem) Tj
+0 -14 Td () Tj
+0 -14 Td (Always verify the signature before trusting status, expiry, activation ID, or hardware) Tj
+0 -14 Td (data.) Tj
+0 -14 Td () Tj
+0 -14 Td (COMMON RESULTS) Tj
+0 -14 Td () Tj
+0 -14 Td (| ResultCode | Meaning |) Tj
+0 -14 Td (|---|---|) Tj
+0 -14 Td (| Activated | Activation is approved. |) Tj
+0 -14 Td (| PendingReview | Activation exists but requires admin review. |) Tj
+0 -14 Td (| Renewed | Check-in succeeded. |) Tj
+0 -14 Td (| Locked | Check-in succeeded but local license must stop being trusted. Check Reason. |) Tj
+0 -14 Td (| InvalidKeyFormat | Bad key format or product version mismatch. |) Tj
+0 -14 Td (| LicenseNotFound | Key does not exist. |) Tj
+0 -14 Td (| LicenseExpired | License is expired. |) Tj
+0 -14 Td (| LicenseRevoked | License is revoked. |) Tj
+0 -14 Td (| RateLimited | Too many requests from the same IP. |) Tj
+0 -14 Td (| ServerError | Unexpected or unparseable server response. |) Tj
+0 -14 Td () Tj
+0 -14 Td (TROUBLESHOOTING) Tj
+0 -14 Td () Tj
+0 -14 Td (CLOUDFLARE 502 OR NON-JSON RESPONSE) Tj
+0 -14 Td () Tj
+0 -14 Td (Older clients could throw JSON parse exceptions. Current DLL maps non-JSON response) Tj
+0 -14 Td (bodies to ServerError with the raw message. Check API service status and runtime) Tj
+0 -14 Td (installation on the server.) Tj
+0 -14 Td () Tj
+0 -14 Td (PENDINGREVIEW) Tj
+0 -14 Td () Tj
+0 -14 Td (This is expected when a new hardware fingerprint exceeds the approved activation limit.) Tj
+0 -14 Td (The signed license file status will be pending_review and includes a review deadline.) Tj
+0 -14 Td () Tj
+0 -14 Td (LICENSEREVOKED) Tj
+0 -14 Td () Tj
+0 -14 Td (The license was revoked in the admin panel. Activation should fail and no local cached) Tj
+0 -14 Td (license should be trusted.) Tj
+0 -14 Td () Tj
+0 -14 Td (VERSION MISMATCH) Tj
+0 -14 Td () Tj
+0 -14 Td (If VersionId is sent and does not match the license version, activation fails with) Tj
+0 -14 Td (InvalidKeyFormat. Omit VersionId for backwards-compatible clients unless the app knows) Tj
+0 -14 Td (the exact version ID.) Tj
+0 -14 Td () Tj
+ET
+endstream
+endobj
+9 0 obj
+<< /Type /Page /Parent 12 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 8 0 R >>
+endobj
+10 0 obj
+<< /Length 347 >>
+stream
+BT /F1 9 Tf 40 760 Td
+(SECURITY NOTES) Tj
+0 -14 Td () Tj
+0 -14 Td (- The RSA public key is safe to embed.) Tj
+0 -14 Td (- Never embed server private keys, database credentials, admin credentials, or) Tj
+0 -14 Td (connection strings.) Tj
+0 -14 Td (- Do not skip signature verification.) Tj
+0 -14 Td (- Treat unknown result codes as failures.) Tj
+ET
+endstream
+endobj
+11 0 obj
+<< /Type /Page /Parent 12 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 10 0 R >>
+endobj
+12 0 obj
+<< /Type /Pages /Kids [3 0 R 5 0 R 7 0 R 9 0 R 11 0 R] /Count 5 >>
+endobj
+13 0 obj
+<< /Type /Catalog /Pages 12 0 R >>
+endobj
+xref
+0 14
+0000000000 65535 f 
+0000000009 00000 n 
+0000000077 00000 n 
+0000002417 00000 n 
+0000002544 00000 n 
+0000004963 00000 n 
+0000005090 00000 n 
+0000007259 00000 n 
+0000007386 00000 n 
+0000009804 00000 n 
+0000009931 00000 n 
+0000010330 00000 n 
+0000010459 00000 n 
+0000010542 00000 n 
+trailer << /Size 14 /Root 13 0 R >>
+startxref
+10593
+%%EOF
