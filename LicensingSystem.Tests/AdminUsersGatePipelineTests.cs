@@ -76,7 +76,7 @@ public class AdminUsersGatePipelineTests
             Assert.Contains("returnUrl", LocationPathAndQuery(response), StringComparison.OrdinalIgnoreCase);
         }
 
-        public sealed class Factory : WebApplicationFactory<Program>
+        public sealed class Factory : WebApplicationFactory<AdminProgram>
         {
             protected override void ConfigureWebHost(IWebHostBuilder builder) =>
                 builder
@@ -127,7 +127,7 @@ public class AdminUsersGatePipelineTests
             Assert.NotEqual(HttpStatusCode.Redirect, response.StatusCode);
         }
 
-        public sealed class Factory : WebApplicationFactory<Program>
+        public sealed class Factory : WebApplicationFactory<AdminProgram>
         {
             protected override void ConfigureWebHost(IWebHostBuilder builder)
             {

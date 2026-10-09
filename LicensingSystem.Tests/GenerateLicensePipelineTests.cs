@@ -89,7 +89,7 @@ public class GenerateLicensePipelineTests
             Assert.Contains("licenses", location, StringComparison.OrdinalIgnoreCase);
         }
 
-        public sealed class Factory : WebApplicationFactory<Program>
+        public sealed class Factory : WebApplicationFactory<AdminProgram>
         {
             protected override void ConfigureWebHost(IWebHostBuilder builder) =>
                 builder.UseSetting("ConnectionStrings:LicensingDb", FakeConnectionString);
@@ -178,7 +178,7 @@ public class GenerateLicensePipelineTests
             Assert.DoesNotContain("Usuarios admin", body);
         }
 
-        public sealed class Factory : WebApplicationFactory<Program>
+        public sealed class Factory : WebApplicationFactory<AdminProgram>
         {
             protected override void ConfigureWebHost(IWebHostBuilder builder)
             {

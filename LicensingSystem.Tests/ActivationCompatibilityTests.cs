@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
-using ActivationHelloWorld;
 using LicensingCore.Crypto;
 using LicensingCore.Entities;
+using Miautrix.Licensing.Client;
 using Xunit;
 
 namespace LicensingSystem.Tests;
@@ -21,7 +21,8 @@ public class ActivationCompatibilityTests
             InstallGuid = Guid.NewGuid(),
             Hardware = new HardwareInfo { CpuId = "c", MotherboardSerial = "m", TpmId = "t", MacAddressPrimary = "ma" },
             VersionId = Guid.NewGuid(),
-            Status = ActivationHelloWorld.LicenseStatus.Test,
+            Status = Miautrix.Licensing.Client.LicenseStatus.Test,
+            Email = "comarcat@gmail.com",
             ClientTimestampUtc = DateTime.UtcNow,
         };
 
@@ -29,5 +30,6 @@ public class ActivationCompatibilityTests
         var json = System.Text.Json.JsonSerializer.Serialize(request);
         Assert.Contains("\"VersionId\"", json);
         Assert.Contains("\"Status\":3", json);
+        Assert.Contains("\"Email\":\"comarcat@gmail.com\"", json);
     }
 }

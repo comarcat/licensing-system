@@ -170,7 +170,7 @@ public sealed class ActivationServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task Activate_NewInstall_CreatesPendingReviewActivationWithSignedFile()
+    public async Task Activate_FirstInstall_CreatesApprovedActivationWithSignedFile()
     {
         var license = await SeedLicenseAsync();
 
@@ -182,10 +182,31 @@ public sealed class ActivationServiceTests : IDisposable
         }, Ct);
 
         Assert.True(result.Success);
-        Assert.Equal(ResultCode.PendingReview, result.Code);
-        Assert.Equal("pending_review", result.Data!.Status);
+        Assert.Equal(ResultCode.Activated, result.Code);
+        Assert.Equal("approved", result.Data!.Status);
         Assert.False(string.IsNullOrEmpty(result.Data.LicenseFileBase64));
         Assert.Equal(1, await _db.Activations.CountAsync(Ct));
+        var activation = await _db.Activations.FirstAsync(Ct);
+        Assert.Equal(ActivationStatus.Approved, activation.Status);
+        Assert.Null(activation.ReviewDeadlineUtc);
+    }
+
+    [Fact]
+    public async Task Activate_WithEmail_UpdatesLicenseCustomerEmail()
+    {
+        var license = await SeedLicenseAsync();
+
+        var result = await _service.ActivateAsync(new ActivateRequest
+        {
+            LicenseKey = license.LicenseKey,
+            InstallGuid = Guid.NewGuid(),
+            Hardware = Hw(),
+            Email = "  comarcat@gmail.com  ",
+        }, Ct);
+
+        Assert.True(result.Success);
+        var reloaded = await _db.Licenses.FirstAsync(l => l.Id == license.Id, Ct);
+        Assert.Equal("comarcat@gmail.com", reloaded.CustomerEmail);
     }
 
     [Fact]
@@ -232,7 +253,7 @@ public sealed class ActivationServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task Activate_RejectedActivationSameHardware_CreatesFreshPendingReview()
+    public async Task Activate_RejectedActivationSameHardware_CreatesFreshApprovedActivationWhenUnderLimit()
     {
         var license = await SeedLicenseAsync();
         var hw = Hw();
@@ -246,13 +267,14 @@ public sealed class ActivationServiceTests : IDisposable
         }, Ct);
 
         Assert.True(result.Success);
-        Assert.Equal(ResultCode.PendingReview, result.Code);
-        Assert.NotEqual(rejected.Id, result.Data!.ActivationId);
+        Assert.Equal(ResultCode.Activated, result.Code);
+        Assert.Equal("approved", result.Data!.Status);
+        Assert.NotEqual(rejected.Id, result.Data.ActivationId);
         Assert.Equal(2, await _db.Activations.CountAsync(Ct));
     }
 
     [Fact]
-    public async Task Activate_MaxActivationsReached_RejectsWithoutCreatingActivation()
+    public async Task Activate_MaxActivationsReached_CreatesPendingReviewActivation()
     {
         var license = await SeedLicenseAsync(maxActivations: 1);
         await SeedActivationAsync(license, Hw("1"), ActivationStatus.Approved);
@@ -264,13 +286,14 @@ public sealed class ActivationServiceTests : IDisposable
             Hardware = Hw("2"),
         }, Ct);
 
-        Assert.False(result.Success);
-        Assert.Equal(ResultCode.MaxActivationsReached, result.Code);
-        Assert.Equal(1, await _db.Activations.CountAsync(Ct));
+        Assert.True(result.Success);
+        Assert.Equal(ResultCode.PendingReview, result.Code);
+        Assert.Equal("pending_review", result.Data!.Status);
+        Assert.Equal(2, await _db.Activations.CountAsync(Ct));
     }
 
     [Fact]
-    public async Task Activate_UnderMaxActivations_StillSucceeds()
+    public async Task Activate_UnderMaxActivations_StillSucceedsWithPendingReview()
     {
         var license = await SeedLicenseAsync(maxActivations: 2);
         await SeedActivationAsync(license, Hw("1"), ActivationStatus.Approved);
@@ -283,7 +306,8 @@ public sealed class ActivationServiceTests : IDisposable
         }, Ct);
 
         Assert.True(result.Success);
-        Assert.Equal(ResultCode.PendingReview, result.Code);
+        Assert.Equal(ResultCode.Activated, result.Code);
+        Assert.Equal("approved", result.Data!.Status);
         Assert.Equal(2, await _db.Activations.CountAsync(Ct));
     }
 

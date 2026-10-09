@@ -81,7 +81,7 @@ public class AdminSeederHostRegistrationTests
     /// callback (which runs after the entry point's registrations but before
     /// <c>ConfigureTestServices</c>), then still drops the seeder so the host can boot.
     /// </summary>
-    private sealed class CountingSeederFactory : WebApplicationFactory<Program>
+    private sealed class CountingSeederFactory : WebApplicationFactory<AdminProgram>
     {
         public int HostedSeederDescriptorCount { get; private set; } = -1;
 

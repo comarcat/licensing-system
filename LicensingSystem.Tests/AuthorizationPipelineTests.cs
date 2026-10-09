@@ -185,7 +185,7 @@ public class AuthorizationPipelineTests : IClassFixture<AuthorizationPipelineTes
     /// anonymous request is redirected by the fallback policy before any page resolves the
     /// <c>DbContextFactory</c>, and <c>db.invalid</c> (RFC 6761) is unresolvable anyway.
     /// </summary>
-    public sealed class PipelineFactory : WebApplicationFactory<Program>
+    public sealed class PipelineFactory : WebApplicationFactory<AdminProgram>
     {
         private const string FakeConnectionString =
             "Host=db.invalid;Database=test;Username=test;Password=test";

@@ -175,4 +175,4 @@ app.Run();
 // Exposes the implicit Program class to the test project so
 // WebApplicationFactory<Program> can boot the real pipeline
 // (AuthorizationPipelineTests) without InternalsVisibleTo.
-public partial class Program { }
+public partial class AdminProgram { }

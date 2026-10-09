@@ -48,8 +48,11 @@ public partial class ActivationService
         if (license.Status == LicenseStatus.Expired)
             return ApiResult.Fail(ResultCode.LicenseExpired, "This license has expired.");
 
-        // Test licenses bypass all activation guards: no max-activation check, no
-        // PendingReview, no subscription expiry — the activation is always Approved.
+        if (!string.IsNullOrWhiteSpace(req.Email))
+            license.CustomerEmail = req.Email.Trim();
+
+        // Test licenses bypass max-activation and subscription guards. Every first
+        // activation is approved; later new installations remain subject to review.
         var isTest = license.Status == LicenseStatus.Test;
 
         var match = _hwMatch.FindMatchingActivation(license.Activations, req.Hardware);
@@ -103,14 +106,8 @@ public partial class ActivationService
             }
             else
             {
-                if (!isTest)
-                {
-                    var approvedCount = license.Activations.Count(a => a.Status == ActivationStatus.Approved);
-                    if (approvedCount >= license.MaxActivations)
-                        return ApiResult.Fail(ResultCode.MaxActivationsReached,
-                            $"Maximum number of active installations ({license.MaxActivations}) reached for this license.");
-                }
-
+                var approvedCount = license.Activations.Count(a => a.Status == ActivationStatus.Approved);
+                var shouldAutoApprove = isTest || approvedCount < license.MaxActivations;
                 activation = new Activation
                 {
                     Id = Guid.NewGuid(),
@@ -120,9 +117,9 @@ public partial class ActivationService
                     MotherboardSerial = req.Hardware.MotherboardSerial,
                     TpmId = req.Hardware.TpmId,
                     MacAddressPrimary = req.Hardware.MacAddressPrimary,
-                    Status = isTest ? ActivationStatus.Approved : ActivationStatus.PendingReview,
+                    Status = shouldAutoApprove ? ActivationStatus.Approved : ActivationStatus.PendingReview,
                     FirstActivatedAtUtc = DateTime.UtcNow,
-                    ReviewDeadlineUtc = isTest ? null : DateTime.UtcNow.AddDays(ReviewGraceDays),
+                    ReviewDeadlineUtc = shouldAutoApprove ? null : DateTime.UtcNow.AddDays(ReviewGraceDays),
                 };
                 ApplyEnvironmentInfo(activation, req.Hardware, req.Vm);
 

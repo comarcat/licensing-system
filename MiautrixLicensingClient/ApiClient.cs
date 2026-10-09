@@ -30,6 +30,7 @@ public class ActivateRequest
     public required Guid InstallGuid { get; set; }
     public required HardwareInfo Hardware { get; set; }
     public string? AppVersion { get; set; }
+    public string? Email { get; set; }
     public DateTime ClientTimestampUtc { get; set; }
 
     /// <summary>

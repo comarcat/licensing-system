@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using ActivationHelloWorld;
+using Miautrix.Licensing.Client;
 
 // A minimal Windows console client for LicensingApi — exercises the same contract a
 // real activation DLL would (docs/activation-dll-integration-reference.md): read
@@ -67,6 +68,14 @@ async Task ActivateAsync()
         return;
     }
 
+    Console.Write("Version ID (optional, press Enter to skip): ");
+    var versionInput = Console.ReadLine()?.Trim();
+    Guid? versionId = string.IsNullOrWhiteSpace(versionInput) ? null : Guid.Parse(versionInput);
+
+    Console.Write("Customer email (optional, press Enter to skip): ");
+    var emailInput = Console.ReadLine()?.Trim();
+    var email = string.IsNullOrWhiteSpace(emailInput) ? null : emailInput;
+
     var hardware = HardwareFingerprint.Read();
     PrintHardware(hardware);
 
@@ -76,10 +85,9 @@ async Task ActivateAsync()
         InstallGuid = state.InstallGuid,
         Hardware = hardware,
         AppVersion = "hello-world-1.0",
+        Email = email,
         ClientTimestampUtc = DateTime.UtcNow,
-        // E3-T5: allow version/status for compat testing
-        VersionId = ArgOrEnv(args, "--version-id", "ACTIVATION_VERSION_ID") is { } vidStr ? Guid.Parse(vidStr) : null,
-        Status = ArgOrEnv(args, "--status", "ACTIVATION_STATUS") is { } stStr ? Enum.Parse<ActivationHelloWorld.LicenseStatus>(stStr) : null,
+        VersionId = versionId,
     }, CancellationToken.None);
 
     PrintResult("activate", status, result);

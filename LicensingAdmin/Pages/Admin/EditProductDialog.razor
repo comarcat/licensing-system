@@ -37,7 +37,7 @@
             <MudItem xs="12">
                 <MudDivider Class="my-2" />
                 <MudText Typo="Typo.h6">Versiones</MudText>
-                @if (Product.Id == Guid.Empty)
+                @if (Product?.Id == Guid.Empty)
                 {
                     <MudText Typo="Typo.caption" Color="Color.Warning">Guarde el producto primero para gestionar versiones.</MudText>
                 }
@@ -54,7 +54,7 @@
                         </RowTemplate>
                     </MudTable>
                     <div class="d-flex gap-2 mt-2">
-                        <MudTextField @bind-Value="_newVersionName" Label="Nueva versión" Dense="true" />
+                        <MudTextField @bind-Value="_newVersionName" Label="Nueva versión" Margin="Margin.Dense" />
                         <MudButton OnClick="AddVersionAsync" Color="Color.Primary" Variant="Variant.Outlined" Class="mt-2">Añadir</MudButton>
                     </div>
                 }
