@@ -50,7 +50,7 @@ public class SmokeTests : IClassFixture<SmokeTests.SolutionFactory>
         Assert.Equal(HttpStatusCode.OK, root.StatusCode);
     }
 
-    public sealed class SolutionFactory : WebApplicationFactory<AdminProgram>
+    public sealed class SolutionFactory : WebApplicationFactory<Program>
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder) =>
             builder

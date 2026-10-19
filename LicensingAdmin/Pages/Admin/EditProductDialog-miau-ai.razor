@@ -1,0 +1,177 @@
+@using LicensingAdmin.Auth
+@using LicensingAdmin.Products
+@using LicensingCore.Entities
+@using LicensingCore.Data
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Components.Authorization
+@using MudBlazor
+
+<MudDialog>
+    <DialogContent>
+        <MudGrid>
+            <MudItem xs="12" md="6">
+                <MudTextField @bind-Value="_name" Label="Nombre" Immediate="true" MaxLength="200" />
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudTextField @bind-Value="_vendor" Label="Fabricante" Immediate="true" MaxLength="200" />
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudTextField @bind-Value="_version" Label="Versión actual (opcional)" Immediate="true" MaxLength="50" />
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudNumericField @bind-Value="_maxActivations" Label="Máx. activaciones por defecto" Min="1" Max="10000" Immediate="true" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Modelo de licencia por defecto</MudText>
+                <div class="d-flex ga-4">
+                    <MudCheckBox T="bool" Value="@_flags.HasFlag(LicenseModel.Machine)" Dense="true" Label="Machine"
+                                 ValueChanged="@(v => Toggle(LicenseModel.Machine, v))" />
+                    <MudCheckBox T="bool" Value="@_flags.HasFlag(LicenseModel.User)" Dense="true" Label="User"
+                                 ValueChanged="@(v => Toggle(LicenseModel.User, v))" />
+                    <MudCheckBox T="bool" Value="@_flags.HasFlag(LicenseModel.Floating)" Dense="true" Label="Floating"
+                                 ValueChanged="@(v => Toggle(LicenseModel.Floating, v))" />
+                    <MudCheckBox T="bool" Value="@_flags.HasFlag(LicenseModel.Subscription)" Dense="true" Label="Subscription"
+                                 ValueChanged="@(v => Toggle(LicenseModel.Subscription, v))" />
+                </div>
+            </MudItem>
+            <MudItem xs="12">
+                <MudDivider Class="my-2" />
+                <MudText Typo="Typo.h6">Versiones</MudText>
+                @if (Product?.Id == Guid.Empty)
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Warning">Guarde el producto primero para gestionar versiones.</MudText>
+                }
+                else
+                {
+                    <MudTable Items="_versions" Dense="true" Hover="true">
+                        <HeaderContent>
+                            <MudTh>Nombre</MudTh>
+                            <MudTh></MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd>@context.Name</MudTd>
+                            <MudTd><MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteVersionAsync(context))" /></MudTd>
+                        </RowTemplate>
+                    </MudTable>
+                    <div class="d-flex gap-2 mt-2">
+                        <MudTextField @bind-Value="_newVersionName" Label="Nueva versión" Margin="Margin.Dense" />
+                        <MudButton OnClick="AddVersionAsync" Color="Color.Primary" Variant="Variant.Outlined" Class="mt-2">Añadir</MudButton>
+                    </div>
+                }
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancelar</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Submit">Guardar</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public SoftwareProduct? Product { get; set; }
+    [Parameter] public bool IsCreate { get; set; }
+    [Inject] private ProductService ProductSvc { get; set; } = default!;
+    [Inject] private AuthenticationStateProvider AuthState { get; set; } = default!;
+    [Inject] private ISnackbar Snackbar { get; set; } = default!;
+
+    private string _name = "";
+    private string _vendor = "";
+    private string? _version;
+    private LicenseModel _flags;
+    private int _maxActivations;
+    private List<ProductVersion> _versions = new();
+    private string? _newVersionName;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Product is not null)
+        {
+            _name = Product.Name;
+            _vendor = Product.Vendor;
+            _version = Product.CurrentVersion;
+            _flags = Product.DefaultLicenseModel;
+            _maxActivations = Product.DefaultMaxActivations;
+            if (!IsCreate) await LoadVersionsAsync();
+        }
+        else
+        {
+            Product = new SoftwareProduct { Id = Guid.Empty, Name = "", Vendor = "" };
+            _flags = LicenseModel.Machine;
+            _maxActivations = 5;
+        }
+    }
+
+    private async Task LoadVersionsAsync() => _versions = (await ProductSvc.ListVersionsAsync(Product!.Id)).ToList();
+
+    private async Task AddVersionAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newVersionName)) return;
+        if (IsCreate)
+        {
+            if (_versions.Any(v => v.Name == _newVersionName)) return;
+            _versions.Add(new ProductVersion { Id = Guid.NewGuid(), Name = _newVersionName.Trim() });
+        }
+        else
+        {
+            var actor = await GetActorAsync();
+            if (actor is null) return;
+            await ProductSvc.CreateVersionAsync(Product!.Id, _newVersionName, actor);
+            await LoadVersionsAsync();
+        }
+        _newVersionName = null;
+        Snackbar.Add("Versión preparada.", Severity.Success);
+    }
+
+    private async Task DeleteVersionAsync(ProductVersion version)
+    {
+        if (IsCreate)
+        {
+            _versions.Remove(version);
+        }
+        else
+        {
+            var actor = await GetActorAsync();
+            if (actor is null) return;
+            try
+            {
+                await ProductSvc.DeleteVersionAsync(version.Id, actor);
+                await LoadVersionsAsync();
+            }
+            catch (ProductInUseException)
+            {
+                Snackbar.Add("No se puede eliminar: licencias la usan.", Severity.Error);
+                return;
+            }
+        }
+        Snackbar.Add("Versión eliminada.", Severity.Success);
+    }
+
+    private async Task<string?> GetActorAsync()
+    {
+        var user = (await AuthState.GetAuthenticationStateAsync()).User;
+        return CurrentAdmin.Email(user) ?? throw new InvalidOperationException("No auth.");
+    }
+
+    private void Toggle(LicenseModel flag, bool value) =>
+        _flags = value ? _flags | flag : _flags & ~flag;
+
+    private void Submit()
+    {
+        var edited = new SoftwareProduct
+        {
+            Id = Product!.Id,
+            Name = _name ?? "",
+            Vendor = _vendor ?? "",
+            CurrentVersion = _version,
+            DefaultLicenseModel = _flags,
+            DefaultMaxActivations = _maxActivations,
+        };
+        var result = new ProductEditResult(edited, _versions.Select(v => v.Name).ToList());
+        MudDialog.Close(DialogResult.Ok(result));
+    }
+
+    public record ProductEditResult(SoftwareProduct Product, List<string> VersionNames);
+
+    private void Cancel() => MudDialog.Cancel();
+}

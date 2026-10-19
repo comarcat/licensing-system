@@ -1,0 +1,63 @@
+@inherits LayoutComponentBase
+@using LicensingAdmin.Auth
+
+<MudThemeProvider Theme="LustroTheme.Theme" IsDarkMode="true" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<MudLayout>
+    <MudAppBar Elevation="0" Class="glass-surface">
+        <MudText Typo="Typo.h6">⚙ License Admin</MudText>
+        <MudSpacer />
+        <AuthorizeView>
+            <Authorized>
+                <MudText Typo="Typo.body2" Class="mr-4">@context.User.Identity?.Name</MudText>
+                <MudButton Href="/account/profile" Variant="Variant.Text" Color="Color.Inherit"
+                           StartIcon="@Icons.Material.Filled.AccountCircle" Size="Size.Small" Class="mr-2">
+                    Mi cuenta
+                </MudButton>
+                <MudButton Href="/Account/Logout" Variant="Variant.Text" Color="Color.Inherit"
+                           StartIcon="@Icons.Material.Filled.Logout" Size="Size.Small">
+                    Cerrar sesión
+                </MudButton>
+            </Authorized>
+        </AuthorizeView>
+    </MudAppBar>
+    <MudDrawer Open="true" Elevation="0" Variant="DrawerVariant.Persistent" Class="glass-surface">
+        <MudNavMenu>
+            <AuthorizeView Policy="@AuthPolicies.ViewerAccess">
+                <MudNavLink Href="dashboard" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dashboard">Dashboard</MudNavLink>
+            </AuthorizeView>
+            <AuthorizeView Policy="@AuthPolicies.ViewerAccess">
+                <MudNavLink Href="licenses" Icon="@Icons.Material.Filled.VpnKey">Licencias</MudNavLink>
+            </AuthorizeView>
+            <AuthorizeView Policy="@AuthPolicies.ReviewAccess">
+                <MudNavLink Href="pending-review" Icon="@Icons.Material.Filled.PendingActions">Pending Review</MudNavLink>
+            </AuthorizeView>
+            <AuthorizeView Policy="@AuthPolicies.IssueAccess">
+                <MudNavLink Href="licenses/new" Icon="@Icons.Material.Filled.AddCircleOutline">Generar licencia</MudNavLink>
+            </AuthorizeView>
+            <AuthorizeView Policy="@AuthPolicies.IssueAccess">
+                <MudNavLink Href="licenses/bulk" Icon="@Icons.Material.Filled.LibraryAdd">Licencias masivas</MudNavLink>
+            </AuthorizeView>
+            <AuthorizeView Policy="@AuthPolicies.IssueAccess">
+                <MudNavLink Href="admin/products" Icon="@Icons.Material.Filled.Inventory2">Productos</MudNavLink>
+            </AuthorizeView>
+            <AuthorizeView Policy="@AuthPolicies.IssueAccess">
+                <MudNavLink Href="admin/docs" Icon="@Icons.Material.Filled.Description">Documentación</MudNavLink>
+            </AuthorizeView>
+            <AuthorizeView Policy="@AuthPolicies.AdminUserAccess">
+                <MudNavLink Href="admin/users" Icon="@Icons.Material.Filled.ManageAccounts">Usuarios admin</MudNavLink>
+            </AuthorizeView>
+            <AuthorizeView Policy="@AuthPolicies.AdminUserAccess">
+                <MudNavLink Href="admin/notifications" Icon="@Icons.Material.Filled.Email">Correo (SMTP)</MudNavLink>
+            </AuthorizeView>
+        </MudNavMenu>
+    </MudDrawer>
+    <MudMainContent>
+        <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="my-4 pt-4">
+            @Body
+        </MudContainer>
+    </MudMainContent>
+</MudLayout>

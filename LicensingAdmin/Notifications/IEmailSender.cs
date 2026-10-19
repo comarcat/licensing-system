@@ -1,4 +1,3 @@
-using System.Security.Authentication;
 using LicensingCore.Entities;
 using MailKit.Net.Smtp;
 using MailKit.Security;
@@ -42,13 +41,6 @@ public sealed class MailKitEmailSender : IEmailSender
         message.Body = new TextPart("plain") { Text = body };
 
         using var client = new SmtpClient();
-
-        // Force TLS 1.2+
-        client.SslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13;
-
-        // TEMPORARY: Trust invalid certs
-        client.ServerCertificateValidationCallback = (s, c, h, e) => true;
-
         var socketOptions = config.Encryption switch
         {
             SmtpEncryption.ImplicitTls => SecureSocketOptions.SslOnConnect,
@@ -57,12 +49,10 @@ public sealed class MailKitEmailSender : IEmailSender
         };
 
         await client.ConnectAsync(config.SmtpHost, config.SmtpPort, socketOptions, ct);
-
         if (!string.IsNullOrEmpty(config.Username))
         {
             await client.AuthenticateAsync(config.Username, plainPassword ?? string.Empty, ct);
         }
-
         await client.SendAsync(message, ct);
         await client.DisconnectAsync(quit: true, ct);
     }
